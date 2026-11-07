@@ -1,0 +1,3 @@
+# Tiles downloaded by scripts/add_elevation.py
+.terrain-cache/
+__pycache__/
