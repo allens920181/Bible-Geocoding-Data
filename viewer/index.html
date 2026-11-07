@@ -2,100 +2,331 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>Bible Places on Terrain</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%235ac8fa'/%3E%3Cstop offset='1' stop-color='%23007aff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='15' fill='url(%23g)'/%3E%3Cpath d='M9 48 26 23l9 13 6-8 14 20z' fill='%23fff'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/dist/maplibre-gl.css">
 <style>
+  /* An iOS look for a desktop browser: system colors, translucent materials, grouped lists,
+     UISwitch-style toggles. The page is meant for a computer, so there is no small-screen layout. */
   :root {
-    --panel-bg: rgba(255, 255, 255, 0.94);
-    --panel-fg: #1f2933;
-    --panel-muted: #5f6c7b;
-    --panel-line: #d5dbe3;
-    --accent: #1d5fa8;
     color-scheme: light dark;
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
+
+    --blue: #007aff;
+    --green: #34c759;
+    --red: #ff3b30;
+    --focus: rgba(0, 122, 255, 0.4);
+
+    --label: #000;
+    --label-2: rgba(60, 60, 67, 0.62);
+    --label-3: rgba(60, 60, 67, 0.32);
+    --separator: rgba(60, 60, 67, 0.2);
+    --fill: rgba(120, 120, 128, 0.2);
+    --fill-2: rgba(120, 120, 128, 0.12);
+    --switch-off: rgba(120, 120, 128, 0.3);
+
+    --material: rgba(246, 246, 248, 0.74);
+    --group: rgba(255, 255, 255, 0.64);
+    --popover: rgba(255, 255, 255, 0.92);
+    --edge: inset 0 0 0 var(--hairline) rgba(0, 0, 0, 0.07), inset 0 var(--hairline) 0 rgba(255, 255, 255, 0.75);
+    --shadow: 0 12px 40px rgba(0, 0, 0, 0.2), 0 2px 8px rgba(0, 0, 0, 0.08);
+    --blur: saturate(180%) blur(28px);
+
+    --hairline: 1px;
   }
+  @media (min-resolution: 2dppx) { :root { --hairline: 0.5px; } }
   @media (prefers-color-scheme: dark) {
     :root {
-      --panel-bg: rgba(28, 33, 40, 0.94);
-      --panel-fg: #e6ebf1;
-      --panel-muted: #9aa7b6;
-      --panel-line: #3a4452;
-      --accent: #7db4ee;
+      --blue: #0a84ff;
+      --green: #30d158;
+      --red: #ff453a;
+      --focus: rgba(10, 132, 255, 0.5);
+
+      --label: #fff;
+      --label-2: rgba(235, 235, 245, 0.62);
+      --label-3: rgba(235, 235, 245, 0.3);
+      --separator: rgba(84, 84, 88, 0.6);
+      --fill: rgba(120, 120, 128, 0.36);
+      --fill-2: rgba(120, 120, 128, 0.24);
+      --switch-off: rgba(120, 120, 128, 0.46);
+
+      --material: rgba(30, 30, 32, 0.72);
+      --group: rgba(120, 120, 128, 0.2);
+      --popover: rgba(44, 44, 46, 0.92);
+      --edge: inset 0 0 0 var(--hairline) rgba(255, 255, 255, 0.1), inset 0 var(--hairline) 0 rgba(255, 255, 255, 0.14);
+      --shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3);
     }
   }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+  [hidden] { display: none !important; }
+  * { -webkit-tap-highlight-color: transparent; }
   html, body { height: 100%; margin: 0; }
-  body { font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: #e9e6df; }
+  body {
+    font: 14px/1.4 var(--font); color: var(--label); background: #e9e6df;
+    -webkit-font-smoothing: antialiased; font-synthesis: none;
+  }
+  button { font: inherit; color: inherit; }
   #map { position: absolute; inset: 0; }
+
+  /* ---- Sidebar -------------------------------------------------------------------------- */
 
   #panel {
     position: absolute; top: 12px; left: 12px; z-index: 2;
-    width: min(320px, calc(100vw - 24px)); box-sizing: border-box;
-    background: var(--panel-bg); color: var(--panel-fg);
-    border-radius: 8px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.28);
-    max-height: calc(100vh - 24px); overflow: auto;
+    width: 340px; box-sizing: border-box; padding: 16px 16px 14px;
+    max-height: calc(100vh - 24px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin;
+    background: var(--material); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+    border-radius: 22px; box-shadow: var(--shadow), var(--edge);
   }
-  #panel summary { cursor: pointer; padding: 10px 14px; font-weight: 600; }
-  #panel .body { padding: 0 14px 14px; }
-  #panel label { display: block; }
-  .row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
-  .row input[type="checkbox"] { margin: 0; }
-  .field { margin-top: 10px; }
-  .field > span { display: block; color: var(--panel-muted); font-size: 12px; margin-bottom: 3px; }
-  #search { width: 100%; box-sizing: border-box; padding: 7px 9px; font: inherit; color: inherit;
-            background: transparent; border: 1px solid var(--panel-line); border-radius: 6px; }
-  #exaggeration { width: 100%; }
-  #legend-bar { height: 10px; border-radius: 5px; border: 1px solid var(--panel-line); }
-  #legend-ticks { position: relative; height: 16px; margin-top: 2px; font-size: 11px; color: var(--panel-muted); }
+  .panel-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 2px 2px 0; }
+  h1 { margin: 0; font: 700 26px/32px var(--font); letter-spacing: 0.3px; }
+  #status { margin: 1px 0 0; min-height: 18px; font-size: 13px; line-height: 18px; color: var(--label-2); }
+  #status.error { color: var(--red); }
+  #panel-body { margin-top: 14px; }
+  #panel.collapsed { padding-bottom: 12px; }
+  #panel.collapsed #panel-body { display: none; }
+
+  .icon-button {
+    flex: none; display: grid; place-items: center; width: 30px; height: 30px; padding: 0; margin-top: 1px;
+    border: 0; border-radius: 50%; background: var(--fill-2); color: var(--label-2); cursor: pointer;
+    transition: background 0.15s, opacity 0.15s;
+  }
+  .icon-button:hover { background: var(--fill); }
+  .icon-button:active { opacity: 0.6; }
+  .icon-button svg { width: 16px; height: 16px; }
+  :is(.icon-button, .switch, .search-field input, .link):focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; }
+
+  /* Search field, like UISearchBar, with its results in a popover underneath. */
+  .search { position: relative; }
+  .search-field {
+    display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 8px; box-sizing: border-box;
+    border-radius: 10px; background: var(--fill-2); color: var(--label-2); transition: box-shadow 0.15s;
+  }
+  .search-field:focus-within { box-shadow: 0 0 0 3px var(--focus); }
+  .search-field > svg { flex: none; width: 16px; height: 16px; }
+  .search-field input {
+    flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; outline: 0; background: transparent;
+    font: 15px/1 var(--font); color: var(--label); -webkit-appearance: none; appearance: none;
+  }
+  .search-field input:focus-visible { outline: 0; }
+  .search-field input::placeholder { color: var(--label-2); }
+  .search-field input::-webkit-search-cancel-button { display: none; }
+  #search-clear { width: 20px; height: 20px; margin: 0; background: none; color: var(--label-3); }
+  #search-clear:hover { background: none; color: var(--label-2); }
+  #search-clear svg { width: 18px; height: 18px; }
+  #search-clear path { stroke: #fff; }
+  @media (prefers-color-scheme: dark) { #search-clear path { stroke: #2c2c2e; } }
+
+  #results {
+    position: absolute; z-index: 10; top: calc(100% + 6px); left: 0; right: 0; margin: 0; padding: 4px; list-style: none;
+    background: var(--popover); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+    border-radius: 14px; box-shadow: var(--shadow), var(--edge);
+  }
+  #results li {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+    padding: 7px 10px; border-radius: 9px; font-size: 14px; cursor: default;
+  }
+  #results li .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #results li .detail { flex: none; font-size: 12px; color: var(--label-2); font-variant-numeric: tabular-nums; }
+  #results li.active { background: var(--blue); color: #fff; }
+  #results li.active .detail { color: rgba(255, 255, 255, 0.78); }
+  #results li.empty { color: var(--label-2); justify-content: center; }
+
+  /* Inset grouped lists */
+  .group-title {
+    margin: 18px 0 6px 14px; font: 400 12px/16px var(--font); letter-spacing: 0.2px;
+    text-transform: uppercase; color: var(--label-2);
+  }
+  .group { background: var(--group); border-radius: 12px; overflow: hidden; }
+  .group > * { position: relative; }
+  .group > :not(:last-child)::after {                     /* hairline separator, inset like UITableView */
+    content: ""; position: absolute; left: 14px; right: 0; bottom: 0; height: var(--hairline); background: var(--separator);
+  }
+  .row {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    min-height: 44px; padding: 0 14px; box-sizing: border-box; font-size: 15px;
+  }
+  .row .value { color: var(--label-2); font-variant-numeric: tabular-nums; text-align: right; }
+
+  /* UISwitch */
+  .switch {
+    -webkit-appearance: none; appearance: none; position: relative; flex: none; margin: 0;
+    width: 46px; height: 28px; border-radius: 14px; background: var(--switch-off); cursor: pointer;
+    transition: background 0.25s;
+  }
+  .switch::before {
+    content: ""; position: absolute; top: 2px; left: 2px; width: 24px; height: 24px; border-radius: 12px; background: #fff;
+    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15), 0 1px 1px rgba(0, 0, 0, 0.16), 0 3px 1px rgba(0, 0, 0, 0.1);
+    transition: transform 0.25s cubic-bezier(0.3, 0.7, 0.4, 1), width 0.2s;
+  }
+  .switch:checked { background: var(--green); }
+  .switch:checked::before { transform: translateX(18px); }
+  .switch:active::before { width: 29px; }
+  .switch:checked:active::before { transform: translateX(13px); }
+
+  /* UISlider */
+  .slider-row { display: block; padding: 9px 14px 8px; font-size: 15px; }
+  .slider-row .head { display: flex; justify-content: space-between; align-items: baseline; }
+  .slider-row output { color: var(--label-2); font-variant-numeric: tabular-nums; }
+  input[type="range"] {
+    --p: 25;                                               /* position in percent, set from script */
+    -webkit-appearance: none; appearance: none; display: block; width: 100%; height: 28px; margin: 2px 0 0;
+    background: transparent; cursor: pointer;
+  }
+  input[type="range"]:disabled { opacity: 0.4; cursor: default; }
+  input[type="range"]:focus-visible { outline: 0; }
+  input[type="range"]::-webkit-slider-runnable-track {
+    height: 4px; border-radius: 2px;
+    background: linear-gradient(to right, var(--blue) calc(var(--p) * 1% + (50 - var(--p)) * 0.24px), var(--switch-off) 0);
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 24px; height: 24px; margin-top: -10px; border-radius: 50%; background: #fff; border: 0;
+    box-shadow: 0 0 0 var(--hairline) rgba(0, 0, 0, 0.06), 0 3px 8px rgba(0, 0, 0, 0.15), 0 1px 1px rgba(0, 0, 0, 0.16), 0 3px 1px rgba(0, 0, 0, 0.1);
+  }
+  input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 4px var(--focus), 0 3px 8px rgba(0, 0, 0, 0.15); }
+  input[type="range"]::-moz-range-track { height: 4px; border-radius: 2px; background: var(--switch-off); }
+  input[type="range"]::-moz-range-progress { height: 4px; border-radius: 2px; background: var(--blue); }
+  input[type="range"]::-moz-range-thumb {
+    width: 24px; height: 24px; border: 0; border-radius: 50%; background: #fff;
+    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15), 0 1px 1px rgba(0, 0, 0, 0.16);
+  }
+
+  .legend { padding: 12px 14px 8px; }
+  #legend-bar { height: 8px; border-radius: 4px; box-shadow: inset 0 0 0 var(--hairline) rgba(0, 0, 0, 0.12); }
+  #legend-ticks { position: relative; height: 16px; margin-top: 4px; font-size: 11px; color: var(--label-2); font-variant-numeric: tabular-nums; }
   #legend-ticks span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
   #legend-ticks span:first-child { transform: none; }            /* keep the end labels inside the bar */
   #legend-ticks span:last-child { transform: translateX(-100%); }
-  #readout, #status { color: var(--panel-muted); font-size: 12px; margin-top: 10px; min-height: 1.4em; }
-  #status.error { color: #c0392b; }
-  #panel a { color: var(--accent); }
 
-  .maplibregl-popup-content { font: 13px/1.4 system-ui, sans-serif; padding: 9px 12px; color: #1f2933; }
-  .maplibregl-popup-content h3 { margin: 0 0 2px; font-size: 14px; }
-  .maplibregl-popup-content .meta { color: #5f6c7b; }
-  .hover-tip .maplibregl-popup-content { padding: 4px 8px; pointer-events: none; }
+  .footnote { margin: 14px 14px 0; font-size: 12px; line-height: 16px; color: var(--label-2); }
+  a { color: var(--blue); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* ---- MapLibre controls, restyled as iOS materials -------------------------------------- */
+
+  .maplibregl-ctrl-group:not(:empty) {
+    border-radius: 12px; overflow: hidden; background: var(--material);
+    -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+    box-shadow: var(--shadow), var(--edge);
+  }
+  .maplibregl-ctrl-group button { width: 34px; height: 34px; transition: background 0.15s; }
+  .maplibregl-ctrl-group button + button { border-top: var(--hairline) solid var(--separator); }
+  .maplibregl-ctrl-group button:not(:disabled):hover { background-color: var(--fill-2); }
+  .maplibregl-ctrl-group button:not(:disabled):active { background-color: var(--fill); }
+  @media (prefers-color-scheme: dark) { .maplibregl-ctrl-icon { filter: invert(1); } }
+
+  .maplibregl-ctrl-scale {
+    background: var(--material); color: var(--label); border-color: var(--label-2); border-radius: 0 0 4px 4px;
+    font: 10px/1.4 var(--font); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+  }
+  .maplibregl-ctrl-attrib.maplibregl-compact, .maplibregl-ctrl-attrib {
+    background: var(--material); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+    border-radius: 12px; box-shadow: var(--edge); font: 11px/1.4 var(--font); color: var(--label-2);
+  }
+  .maplibregl-ctrl-attrib a { color: var(--label-2); }
+  @media (prefers-color-scheme: dark) { .maplibregl-ctrl-attrib-button { filter: invert(1); } }
+
+  /* ---- Callout and hover label ----------------------------------------------------------- */
+
+  .maplibregl-popup-content {
+    width: 268px; box-sizing: border-box; padding: 16px 16px 4px;
+    background: var(--popover); color: var(--label); font: 14px/1.4 var(--font);
+    -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+    border-radius: 16px; box-shadow: var(--shadow), var(--edge);
+  }
+  .maplibregl-popup-tip { display: none; }
+  .maplibregl-popup-close-button {
+    top: 12px; right: 12px; display: grid; place-items: center; width: 22px; height: 22px; padding: 0 0 2px;
+    border-radius: 50%; background: var(--fill-2); color: var(--label-2); font: 400 17px/1 var(--font);
+    transition: background 0.15s;
+  }
+  .maplibregl-popup-close-button:hover { background: var(--fill); }
+  .callout h3 { margin: 0 28px 0 0; font: 600 17px/22px var(--font); letter-spacing: -0.2px; }
+  .callout .subtitle { margin: 1px 0 12px; font-size: 13px; color: var(--label-2); }
+  .callout dl { margin: 0; background: var(--fill-2); border-radius: 10px; }
+  .callout .fact { position: relative; display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px; font-size: 13px; }
+  .callout .fact:not(:last-child)::after {
+    content: ""; position: absolute; left: 12px; right: 0; bottom: 0; height: var(--hairline); background: var(--separator);
+  }
+  .callout dt { color: var(--label-2); }
+  .callout dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+  .callout .link {
+    display: flex; justify-content: space-between; margin: 4px -4px 8px; padding: 9px 12px; border-radius: 10px;
+    font-size: 14px; transition: background 0.15s;
+  }
+  .callout .link:hover { text-decoration: none; background: var(--fill-2); }
+  .callout .link:focus-visible { outline-offset: 0; }
+  .callout .link::after { content: "↗"; }
+
+  .hover-tip .maplibregl-popup-content {
+    width: auto; padding: 5px 10px; border-radius: 9px; font-size: 12px; font-weight: 500; pointer-events: none;
+  }
 </style>
 </head>
 <body>
 <div id="map"></div>
 
-<details id="panel" open>
-  <summary>Bible places on terrain</summary>
-  <div class="body">
-    <label class="field">
-      <span>Find a place</span>
-      <input id="search" type="search" list="place-list" placeholder="e.g. Mount Zion" autocomplete="off">
-      <datalist id="place-list"></datalist>
-    </label>
+<aside id="panel" aria-label="Map controls">
+  <div class="panel-header">
+    <div>
+      <h1>Bible Places</h1>
+      <p id="status" role="status">Loading places…</p>
+    </div>
+    <button id="panel-toggle" class="icon-button" type="button" aria-expanded="true" aria-controls="panel-body" title="Hide sidebar">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true">
+        <rect x="1.7" y="2.7" width="12.6" height="10.6" rx="2.4"/><path d="M6.2 3v10" stroke-linecap="round"/>
+      </svg>
+    </button>
+  </div>
 
-    <div class="field">
-      <span>Map</span>
-      <label class="row"><input id="toggle-terrain" type="checkbox" checked> 3D terrain</label>
-      <label class="row"><input id="toggle-hillshade" type="checkbox" checked> Hillshade</label>
-      <label class="row"><input id="toggle-osm" type="checkbox" checked> OpenStreetMap base</label>
+  <div id="panel-body">
+    <div class="search">
+      <div class="search-field">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+          <circle cx="6.8" cy="6.8" r="4.6"/><path d="m10.3 10.3 3.6 3.6"/>
+        </svg>
+        <input id="search" type="search" role="combobox" aria-label="Search places" aria-autocomplete="list"
+               aria-expanded="false" aria-controls="results" placeholder="Search places" autocomplete="off" spellcheck="false">
+        <button id="search-clear" class="icon-button" type="button" aria-label="Clear search" hidden>
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <circle cx="10" cy="10" r="8.5" fill="currentColor"/>
+            <path d="m7 7 6 6m0-6-6 6" fill="none" stroke-width="1.7" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+      <ul id="results" role="listbox" aria-label="Matching places" hidden></ul>
     </div>
 
-    <label class="field">
-      <span>Vertical exaggeration: <output id="exaggeration-value">1.5×</output></span>
-      <input id="exaggeration" type="range" min="1" max="4" step="0.5" value="1.5">
-    </label>
+    <h2 class="group-title">Layers</h2>
+    <div class="group">
+      <label class="row"><span>3D terrain</span><input id="toggle-terrain" class="switch" type="checkbox" role="switch" checked></label>
+      <label class="row"><span>Hillshade</span><input id="toggle-hillshade" class="switch" type="checkbox" role="switch" checked></label>
+      <label class="row"><span>OpenStreetMap base</span><input id="toggle-osm" class="switch" type="checkbox" role="switch" checked></label>
+    </div>
 
-    <div class="field">
-      <span>Elevation of each place (m)</span>
+    <h2 class="group-title">Relief</h2>
+    <div class="group">
+      <label class="slider-row">
+        <span class="head"><span>Vertical exaggeration</span><output id="exaggeration-value">1.5×</output></span>
+        <input id="exaggeration" type="range" min="1" max="4" step="0.5" value="1.5">
+      </label>
+      <div class="row" title="Terrain elevation under the cursor">
+        <span>Under cursor</span><output id="readout" class="value" aria-live="off">Move over the map</output>
+      </div>
+    </div>
+
+    <h2 class="group-title">Elevation of each place (m)</h2>
+    <div class="group legend">
       <div id="legend-bar"></div>
       <div id="legend-ticks"></div>
     </div>
 
-    <div id="readout" aria-live="off">Move the cursor over the map for the terrain elevation.</div>
-    <div id="status" role="status">Loading places…</div>
-    <p style="margin: 10px 0 0; font-size: 12px; color: var(--panel-muted)">
+    <p class="footnote">
       Data: <a href="https://www.openbible.info/geo/">OpenBible.info</a>, CC BY 4.0.
     </p>
   </div>
-</details>
+</aside>
 
 <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
 <script>
@@ -113,6 +344,7 @@
   const OSM_TILES = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
   const DATA_URL = "../data/modern.jsonl";   // relative to this page; serve the repository root
   const PLACE_URL = "https://www.openbible.info/geo/modern/";
+  const RESULT_LIMIT = 8;
 
   // Place colors by elevation, shared by the map layer and the legend. Viridis-like,
   // so it stays readable for color-blind viewers and against any background.
@@ -121,6 +353,9 @@
     [600, "#22a884"], [1200, "#7ad151"], [2400, "#fde725"],
   ];
   const NO_ELEVATION_COLOR = "#9aa0a6";
+
+  // Dot size by zoom; `extra` widens it for the soft shadow drawn underneath.
+  const placeRadius = (extra) => ["interpolate", ["linear"], ["zoom"], 4, 3 + extra, 8, 5 + extra, 12, 7.5 + extra];
 
   // ---- Map ----------------------------------------------------------------
 
@@ -143,20 +378,23 @@
       },
       layers: [
         { id: "background", type: "background", paint: { "background-color": "#e9e6df" } },
-        { id: "osm", type: "raster", source: "osm" },
+        // A little desaturated, so the colored dots stand out the way they do in Apple Maps.
+        { id: "osm", type: "raster", source: "osm", paint: { "raster-saturation": -0.25 } },
         { id: "hillshade", type: "hillshade", source: "hillshade-dem",
           paint: { "hillshade-exaggeration": 0.55, "hillshade-shadow-color": "#3d3223",
                    "hillshade-highlight-color": "#ffffff", "hillshade-accent-color": "#6b5b3e" } },
+        { id: "places-shadow", type: "circle", source: "places",
+          paint: { "circle-radius": placeRadius(1.5), "circle-color": "#000", "circle-opacity": 0.3,
+                   "circle-blur": 0.8, "circle-translate": [0, 1.5] } },
         { id: "places", type: "circle", source: "places",
           paint: {
-            "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 2.5, 8, 4.5, 12, 7],
+            "circle-radius": placeRadius(0),
             "circle-color": ["case", ["has", "elevation_meters"],
               ["interpolate", ["linear"], ["get", "elevation_meters"],
                 ...ELEVATION_STOPS.flat()],
               NO_ELEVATION_COLOR],
-            "circle-stroke-color": "#15181c",
-            "circle-stroke-width": 1,
-            "circle-opacity": 0.95,
+            "circle-stroke-color": "#ffffff",
+            "circle-stroke-width": 1.5,
           } },
       ],
     },
@@ -172,8 +410,9 @@
   map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-left");
 
   function applyTerrain() {
-    const on = document.getElementById("toggle-terrain").checked;
+    const on = $("toggle-terrain").checked;
     map.setTerrain(on ? { source: "terrain-dem", exaggeration: state.exaggeration } : null);
+    $("exaggeration").disabled = !on;
   }
 
   map.on("load", () => {
@@ -192,7 +431,7 @@
 
   // ---- Controls -----------------------------------------------------------
 
-  const $ = (id) => document.getElementById(id);
+  function $(id) { return document.getElementById(id); }
   function setStatus(text, isError) {
     const status = $("status");
     status.textContent = text;
@@ -214,12 +453,24 @@
   $("toggle-terrain").addEventListener("change", applyTerrain);
   $("toggle-hillshade").addEventListener("change", (e) => setVisible("hillshade", e.target.checked));
   $("toggle-osm").addEventListener("change", (e) => setVisible("osm", e.target.checked));
+
+  function paintSlider() {
+    const slider = $("exaggeration");
+    slider.style.setProperty("--p", ((slider.value - slider.min) / (slider.max - slider.min)) * 100);
+  }
   $("exaggeration").addEventListener("input", (e) => {
     state.exaggeration = Number(e.target.value);
     $("exaggeration-value").textContent = state.exaggeration + "×";
+    paintSlider();
     if ($("toggle-terrain").checked) applyTerrain();
   });
-  if (window.innerWidth < 600) $("panel").open = false;   // leave the map visible on phones
+  paintSlider();
+
+  $("panel-toggle").addEventListener("click", () => {
+    const collapsed = $("panel").classList.toggle("collapsed");
+    $("panel-toggle").setAttribute("aria-expanded", String(!collapsed));
+    $("panel-toggle").title = collapsed ? "Show sidebar" : "Hide sidebar";
+  });
 
   // Legend: a CSS gradient whose stops sit at the same elevations as the map layer's.
   (function buildLegend() {
@@ -240,6 +491,10 @@
   // ---- Places -------------------------------------------------------------
 
   const features = new Map();   // search label -> GeoJSON feature
+  const searchIndex = [];       // { feature, name, detail, key } for the results list
+
+  // Lower-case and drop accents, so "beth shean" finds "Bêth-Shean".
+  const fold = (text) => text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 
   async function loadPlaces() {
     let text;
@@ -268,17 +523,16 @@
     map.getSource("places").setData(collection);
 
     // Search list. Several locations can share a name, so disambiguate by type, then by id.
-    const options = document.createDocumentFragment();
     for (const feature of collection.features) {
       const p = feature.properties;
       let label = p.name + " (" + p.type + ")";
       if (features.has(label)) label += " " + p.id;
       features.set(label, feature);
-      const option = document.createElement("option");
-      option.value = label;
-      options.appendChild(option);
+      searchIndex.push({
+        feature, name: p.name, key: fold(p.name),
+        detail: p.type + ("elevation_meters" in p ? " · " + p.elevation_meters.toLocaleString() + " m" : ""),
+      });
     }
-    $("place-list").appendChild(options);
 
     const withElevation = collection.features.filter((f) => "elevation_meters" in f.properties).length;
     setStatus(collection.features.length.toLocaleString() + " places" +
@@ -286,16 +540,26 @@
         ? " (" + withElevation + " with a stored elevation; run scripts/add_elevation.py for the rest)" : ""));
   }
 
+  function fact(label, value) {
+    const row = document.createElement("div");
+    row.className = "fact";
+    const term = document.createElement("dt");
+    term.textContent = label;
+    const description = document.createElement("dd");
+    description.textContent = value;
+    row.append(term, description);
+    return row;
+  }
+
   function describe(feature) {
     const p = feature.properties;
     const root = document.createElement("div");
+    root.className = "callout";
 
     const title = document.createElement("h3");
     title.textContent = p.name;
     root.appendChild(title);
 
-    const meta = document.createElement("div");
-    meta.className = "meta";
     const [lon, lat] = feature.geometry.coordinates;
     let elevation = p.elevation_meters;
     let source = "";
@@ -303,26 +567,30 @@
       const live = terrainElevation(feature.geometry.coordinates);
       if (live !== null) { elevation = Math.round(live); source = " (terrain tiles)"; }
     }
-    meta.textContent = p.type + (p.water ? " · water" : "") + " · " +
-      (elevation === undefined ? "elevation unknown" : elevation.toLocaleString() + " m" + source);
-    root.appendChild(meta);
 
-    const coordinates = document.createElement("div");
-    coordinates.className = "meta";
-    coordinates.textContent = lat.toFixed(5) + "°, " + lon.toFixed(5) + "°";
-    root.appendChild(coordinates);
+    const subtitle = document.createElement("div");
+    subtitle.className = "subtitle";
+    subtitle.textContent = p.type + (p.water ? " · water" : "");
+    root.appendChild(subtitle);
+
+    const facts = document.createElement("dl");
+    facts.append(
+      fact("Elevation", elevation === undefined ? "Unknown" : elevation.toLocaleString() + " m" + source),
+      fact("Location", lat.toFixed(5) + "°, " + lon.toFixed(5) + "°"));
+    root.appendChild(facts);
 
     const link = document.createElement("a");
+    link.className = "link";
     link.href = PLACE_URL + encodeURIComponent(p.id) + "/" + encodeURIComponent(p.slug);
     link.target = "_blank";
     link.rel = "noopener";
-    link.textContent = "Open on OpenBible.info ↗";
+    link.textContent = "Open on OpenBible.info";
     root.appendChild(link);
     return root;
   }
 
-  const detail = new maplibregl.Popup({ offset: 12, maxWidth: "280px" });
-  const tip = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 12, className: "hover-tip" });
+  const detail = new maplibregl.Popup({ offset: 14, maxWidth: "none" });
+  const tip = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 14, className: "hover-tip" });
 
   function show(feature) {
     tip.remove();
@@ -340,16 +608,112 @@
       tip.remove();
     }
     const elevation = terrainElevation(event.lngLat);
-    $("readout").textContent = elevation === null
-      ? "Terrain elevation: not available (terrain off or still loading)"
-      : "Terrain elevation under cursor: " + Math.round(elevation).toLocaleString() + " m";
+    $("readout").textContent = elevation === null ? "Unavailable" : Math.round(elevation).toLocaleString() + " m";
   });
 
-  $("search").addEventListener("input", (event) => {
-    const feature = features.get(event.target.value);
-    if (!feature) return;
+  // ---- Search: a combobox with a popover list of matches -----------------------
+
+  const searchBox = $("search");
+  const resultList = $("results");
+  const clearButton = $("search-clear");
+  let results = [];
+  let active = -1;
+
+  function setOpen(open) {
+    resultList.hidden = !open;
+    searchBox.setAttribute("aria-expanded", String(open));
+    if (!open) searchBox.removeAttribute("aria-activedescendant");
+  }
+
+  function setActive(index) {
+    active = index;
+    [...resultList.children].forEach((item, i) => item.classList.toggle("active", i === index));
+    if (index >= 0) searchBox.setAttribute("aria-activedescendant", "result-" + index);
+    else searchBox.removeAttribute("aria-activedescendant");
+  }
+
+  function renderResults() {
+    const query = fold(searchBox.value.trim());
+    results = [];
+    if (query) {
+      const prefix = [];
+      const inside = [];
+      for (const item of searchIndex) {
+        const at = item.key.indexOf(query);
+        if (at === 0) prefix.push(item);
+        else if (at > 0) inside.push(item);
+        if (prefix.length >= RESULT_LIMIT) break;
+      }
+      results = prefix.concat(inside).slice(0, RESULT_LIMIT);
+    }
+
+    resultList.textContent = "";
+    if (!query) { setOpen(false); return; }
+    results.forEach((item, i) => {
+      const row = document.createElement("li");
+      row.id = "result-" + i;
+      row.setAttribute("role", "option");
+      const name = document.createElement("span");
+      name.className = "name";
+      name.textContent = item.name;
+      const meta = document.createElement("span");
+      meta.className = "detail";
+      meta.textContent = item.detail;
+      row.append(name, meta);
+      row.addEventListener("mousedown", (event) => { event.preventDefault(); choose(item); });  // keep focus in the field
+      row.addEventListener("mouseenter", () => setActive(i));
+      resultList.appendChild(row);
+    });
+    if (!results.length) {
+      const none = document.createElement("li");
+      none.className = "empty";
+      none.setAttribute("role", "presentation");
+      none.textContent = "No places found";
+      resultList.appendChild(none);
+    }
+    setActive(results.length ? 0 : -1);
+    setOpen(true);
+  }
+
+  function flyTo(feature) {
     map.flyTo({ center: feature.geometry.coordinates, zoom: Math.max(map.getZoom(), 11), speed: 1.4 });
     map.once("moveend", () => show(feature));
+  }
+
+  function choose(item) {
+    searchBox.value = item.name;
+    clearButton.hidden = false;
+    setOpen(false);
+    flyTo(item.feature);
+  }
+
+  searchBox.addEventListener("input", () => {
+    clearButton.hidden = !searchBox.value;
+    const exact = features.get(searchBox.value);        // a full "Name (type)" label, e.g. pasted
+    if (exact) { setOpen(false); flyTo(exact); } else { renderResults(); }
+  });
+  searchBox.addEventListener("focus", () => { if (searchBox.value) renderResults(); });
+  searchBox.addEventListener("blur", () => setOpen(false));
+  searchBox.addEventListener("keydown", (event) => {
+    const open = !resultList.hidden;
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (!open) { renderResults(); return; }
+      if (!results.length) return;
+      const step = event.key === "ArrowDown" ? 1 : -1;
+      setActive((active + step + results.length) % results.length);
+    } else if (event.key === "Enter") {
+      if (open && results[active]) { event.preventDefault(); choose(results[active]); }
+    } else if (event.key === "Escape") {
+      if (open) { event.preventDefault(); setOpen(false); }
+      else if (searchBox.value) { searchBox.value = ""; clearButton.hidden = true; }
+    }
+  });
+  clearButton.addEventListener("click", () => {
+    searchBox.value = "";
+    clearButton.hidden = true;
+    setOpen(false);
+    searchBox.focus();
   });
 
   // Expose for debugging and automated checks.
