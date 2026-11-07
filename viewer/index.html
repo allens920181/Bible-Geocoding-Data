@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bible Places on Terrain</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/dist/maplibre-gl.css">
+<style>
+  :root {
+    --panel-bg: rgba(255, 255, 255, 0.94);
+    --panel-fg: #1f2933;
+    --panel-muted: #5f6c7b;
+    --panel-line: #d5dbe3;
+    --accent: #1d5fa8;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --panel-bg: rgba(28, 33, 40, 0.94);
+      --panel-fg: #e6ebf1;
+      --panel-muted: #9aa7b6;
+      --panel-line: #3a4452;
+      --accent: #7db4ee;
+    }
+  }
+  html, body { height: 100%; margin: 0; }
+  body { font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: #e9e6df; }
+  #map { position: absolute; inset: 0; }
+
+  #panel {
+    position: absolute; top: 12px; left: 12px; z-index: 2;
+    width: min(320px, calc(100vw - 24px)); box-sizing: border-box;
+    background: var(--panel-bg); color: var(--panel-fg);
+    border-radius: 8px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.28);
+    max-height: calc(100vh - 24px); overflow: auto;
+  }
+  #panel summary { cursor: pointer; padding: 10px 14px; font-weight: 600; }
+  #panel .body { padding: 0 14px 14px; }
+  #panel label { display: block; }
+  .row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+  .row input[type="checkbox"] { margin: 0; }
+  .field { margin-top: 10px; }
+  .field > span { display: block; color: var(--panel-muted); font-size: 12px; margin-bottom: 3px; }
+  #search { width: 100%; box-sizing: border-box; padding: 7px 9px; font: inherit; color: inherit;
+            background: transparent; border: 1px solid var(--panel-line); border-radius: 6px; }
+  #exaggeration { width: 100%; }
+  #legend-bar { height: 10px; border-radius: 5px; border: 1px solid var(--panel-line); }
+  #legend-ticks { position: relative; height: 16px; margin-top: 2px; font-size: 11px; color: var(--panel-muted); }
+  #legend-ticks span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+  #legend-ticks span:first-child { transform: none; }            /* keep the end labels inside the bar */
+  #legend-ticks span:last-child { transform: translateX(-100%); }
+  #readout, #status { color: var(--panel-muted); font-size: 12px; margin-top: 10px; min-height: 1.4em; }
+  #status.error { color: #c0392b; }
+  #panel a { color: var(--accent); }
+
+  .maplibregl-popup-content { font: 13px/1.4 system-ui, sans-serif; padding: 9px 12px; color: #1f2933; }
+  .maplibregl-popup-content h3 { margin: 0 0 2px; font-size: 14px; }
+  .maplibregl-popup-content .meta { color: #5f6c7b; }
+  .hover-tip .maplibregl-popup-content { padding: 4px 8px; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<details id="panel" open>
+  <summary>Bible places on terrain</summary>
+  <div class="body">
+    <label class="field">
+      <span>Find a place</span>
+      <input id="search" type="search" list="place-list" placeholder="e.g. Mount Zion" autocomplete="off">
+      <datalist id="place-list"></datalist>
+    </label>
+
+    <div class="field">
+      <span>Map</span>
+      <label class="row"><input id="toggle-terrain" type="checkbox" checked> 3D terrain</label>
+      <label class="row"><input id="toggle-hillshade" type="checkbox" checked> Hillshade</label>
+      <label class="row"><input id="toggle-osm" type="checkbox" checked> OpenStreetMap base</label>
+    </div>
+
+    <label class="field">
+      <span>Vertical exaggeration: <output id="exaggeration-value">1.5×</output></span>
+      <input id="exaggeration" type="range" min="1" max="4" step="0.5" value="1.5">
+    </label>
+
+    <div class="field">
+      <span>Elevation of each place (m)</span>
+      <div id="legend-bar"></div>
+      <div id="legend-ticks"></div>
+    </div>
+
+    <div id="readout" aria-live="off">Move the cursor over the map for the terrain elevation.</div>
+    <div id="status" role="status">Loading places…</div>
+    <p style="margin: 10px 0 0; font-size: 12px; color: var(--panel-muted)">
+      Data: <a href="https://www.openbible.info/geo/">OpenBible.info</a>, CC BY 4.0.
+    </p>
+  </div>
+</details>
+
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  // ---- Configuration ------------------------------------------------------
+
+  // AWS Terrain Tiles, Terrarium encoding: elevation = R*256 + G + B/256 - 32768.
+  // https://registry.opendata.aws/terrain-tiles/
+  const TERRAIN_TILES = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
+  const TERRAIN_ATTRIBUTION =
+    '<a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noopener">AWS Terrain Tiles</a> ' +
+    '(<a href="https://github.com/tilezen/joerd/blob/master/docs/attribution.md" target="_blank" rel="noopener">sources</a>)';
+  const OSM_TILES = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+  const DATA_URL = "../data/modern.jsonl";   // relative to this page; serve the repository root
+  const PLACE_URL = "https://www.openbible.info/geo/modern/";
+
+  // Place colors by elevation, shared by the map layer and the legend. Viridis-like,
+  // so it stays readable for color-blind viewers and against any background.
+  const ELEVATION_STOPS = [
+    [-420, "#440154"], [-100, "#414487"], [200, "#2a788e"],
+    [600, "#22a884"], [1200, "#7ad151"], [2400, "#fde725"],
+  ];
+  const NO_ELEVATION_COLOR = "#9aa0a6";
+
+  // ---- Map ----------------------------------------------------------------
+
+  const state = { exaggeration: 1.5 };
+
+  const map = new maplibregl.Map({
+    container: "map",
+    style: {
+      version: 8,
+      sources: {
+        osm: { type: "raster", tiles: [OSM_TILES], tileSize: 256, maxzoom: 19,
+               attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors' },
+        // Two sources with the same tiles: MapLibre recommends keeping the hillshade's
+        // DEM separate from the terrain's, so the two can be requested at different zooms.
+        "terrain-dem": { type: "raster-dem", tiles: [TERRAIN_TILES], tileSize: 256, maxzoom: 15,
+                         encoding: "terrarium", attribution: TERRAIN_ATTRIBUTION },
+        "hillshade-dem": { type: "raster-dem", tiles: [TERRAIN_TILES], tileSize: 256, maxzoom: 15,
+                           encoding: "terrarium" },
+        places: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
+      },
+      layers: [
+        { id: "background", type: "background", paint: { "background-color": "#e9e6df" } },
+        { id: "osm", type: "raster", source: "osm" },
+        { id: "hillshade", type: "hillshade", source: "hillshade-dem",
+          paint: { "hillshade-exaggeration": 0.55, "hillshade-shadow-color": "#3d3223",
+                   "hillshade-highlight-color": "#ffffff", "hillshade-accent-color": "#6b5b3e" } },
+        { id: "places", type: "circle", source: "places",
+          paint: {
+            "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 2.5, 8, 4.5, 12, 7],
+            "circle-color": ["case", ["has", "elevation_meters"],
+              ["interpolate", ["linear"], ["get", "elevation_meters"],
+                ...ELEVATION_STOPS.flat()],
+              NO_ELEVATION_COLOR],
+            "circle-stroke-color": "#15181c",
+            "circle-stroke-width": 1,
+            "circle-opacity": 0.95,
+          } },
+      ],
+    },
+    center: [35.35, 31.75],
+    zoom: 8.6,
+    pitch: 60,
+    bearing: 80,       // look east across the Judean hills toward the Dead Sea
+    maxPitch: 80,
+    hash: true,
+    attributionControl: { compact: true },
+  });
+  map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
+  map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-left");
+
+  function applyTerrain() {
+    const on = document.getElementById("toggle-terrain").checked;
+    map.setTerrain(on ? { source: "terrain-dem", exaggeration: state.exaggeration } : null);
+  }
+
+  map.on("load", () => {
+    applyTerrain();
+    loadPlaces();
+  });
+
+  let warned = false;
+  map.on("error", (event) => {
+    console.error(event.error || event);
+    if (!warned && event.sourceId) {
+      warned = true;
+      setStatus("Some map tiles failed to load; check your connection.", true);
+    }
+  });
+
+  // ---- Controls -----------------------------------------------------------
+
+  const $ = (id) => document.getElementById(id);
+  function setStatus(text, isError) {
+    const status = $("status");
+    status.textContent = text;
+    status.className = isError ? "error" : "";
+  }
+  function setVisible(layer, visible) {
+    map.setLayoutProperty(layer, "visibility", visible ? "visible" : "none");
+  }
+
+  // Elevation in meters from the terrain tiles MapLibre has loaded, or null when terrain is
+  // off or the tile isn't loaded yet. queryTerrainElevation returns the value *multiplied by*
+  // the vertical exaggeration (1154 m at 1.5x for a 770 m hill), so divide that back out.
+  function terrainElevation(lngLat) {
+    const terrain = map.getTerrain();
+    const exaggerated = map.queryTerrainElevation(lngLat);
+    return terrain && exaggerated !== null ? exaggerated / terrain.exaggeration : null;
+  }
+
+  $("toggle-terrain").addEventListener("change", applyTerrain);
+  $("toggle-hillshade").addEventListener("change", (e) => setVisible("hillshade", e.target.checked));
+  $("toggle-osm").addEventListener("change", (e) => setVisible("osm", e.target.checked));
+  $("exaggeration").addEventListener("input", (e) => {
+    state.exaggeration = Number(e.target.value);
+    $("exaggeration-value").textContent = state.exaggeration + "×";
+    if ($("toggle-terrain").checked) applyTerrain();
+  });
+  if (window.innerWidth < 600) $("panel").open = false;   // leave the map visible on phones
+
+  // Legend: a CSS gradient whose stops sit at the same elevations as the map layer's.
+  (function buildLegend() {
+    const low = ELEVATION_STOPS[0][0];
+    const span = ELEVATION_STOPS[ELEVATION_STOPS.length - 1][0] - low;
+    const percent = (elevation) => ((elevation - low) / span) * 100;
+    $("legend-bar").style.background = "linear-gradient(to right, " +
+      ELEVATION_STOPS.map(([e, color]) => color + " " + percent(e).toFixed(1) + "%").join(", ") + ")";
+    const ticks = $("legend-ticks");
+    [[-420, "−420"], [0, "0"], [600, "600"], [1200, "1200"], [2400, "2400+"]].forEach(([e, label]) => {
+      const tick = document.createElement("span");
+      tick.style.left = percent(e) + "%";
+      tick.textContent = label;
+      ticks.appendChild(tick);
+    });
+  })();
+
+  // ---- Places -------------------------------------------------------------
+
+  const features = new Map();   // search label -> GeoJSON feature
+
+  async function loadPlaces() {
+    let text;
+    try {
+      const response = await fetch(DATA_URL);
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      text = await response.text();
+    } catch (error) {
+      setStatus("Could not load " + DATA_URL + " (" + error.message + "). Serve the repository root over " +
+                "HTTP, e.g. `python3 -m http.server`, and open /viewer/.", true);
+      return;
+    }
+
+    const collection = { type: "FeatureCollection", features: [] };
+    for (const line of text.split("\n")) {
+      if (!line) continue;
+      const place = JSON.parse(line);
+      const [lon, lat] = place.lonlat.split(",").map(Number);
+      const properties = {
+        id: place.id, name: place.friendly_id, type: place.type, slug: place.url_slug,
+        water: place.land_or_water === "water",
+      };
+      if (Number.isInteger(place.elevation_meters)) properties.elevation_meters = place.elevation_meters;
+      collection.features.push({ type: "Feature", properties, geometry: { type: "Point", coordinates: [lon, lat] } });
+    }
+    map.getSource("places").setData(collection);
+
+    // Search list. Several locations can share a name, so disambiguate by type, then by id.
+    const options = document.createDocumentFragment();
+    for (const feature of collection.features) {
+      const p = feature.properties;
+      let label = p.name + " (" + p.type + ")";
+      if (features.has(label)) label += " " + p.id;
+      features.set(label, feature);
+      const option = document.createElement("option");
+      option.value = label;
+      options.appendChild(option);
+    }
+    $("place-list").appendChild(options);
+
+    const withElevation = collection.features.filter((f) => "elevation_meters" in f.properties).length;
+    setStatus(collection.features.length.toLocaleString() + " places" +
+      (withElevation < collection.features.length
+        ? " (" + withElevation + " with a stored elevation; run scripts/add_elevation.py for the rest)" : ""));
+  }
+
+  function describe(feature) {
+    const p = feature.properties;
+    const root = document.createElement("div");
+
+    const title = document.createElement("h3");
+    title.textContent = p.name;
+    root.appendChild(title);
+
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    const [lon, lat] = feature.geometry.coordinates;
+    let elevation = p.elevation_meters;
+    let source = "";
+    if (elevation === undefined) {            // data not enriched: fall back to the live terrain
+      const live = terrainElevation(feature.geometry.coordinates);
+      if (live !== null) { elevation = Math.round(live); source = " (terrain tiles)"; }
+    }
+    meta.textContent = p.type + (p.water ? " · water" : "") + " · " +
+      (elevation === undefined ? "elevation unknown" : elevation.toLocaleString() + " m" + source);
+    root.appendChild(meta);
+
+    const coordinates = document.createElement("div");
+    coordinates.className = "meta";
+    coordinates.textContent = lat.toFixed(5) + "°, " + lon.toFixed(5) + "°";
+    root.appendChild(coordinates);
+
+    const link = document.createElement("a");
+    link.href = PLACE_URL + encodeURIComponent(p.id) + "/" + encodeURIComponent(p.slug);
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.textContent = "Open on OpenBible.info ↗";
+    root.appendChild(link);
+    return root;
+  }
+
+  const detail = new maplibregl.Popup({ offset: 12, maxWidth: "280px" });
+  const tip = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 12, className: "hover-tip" });
+
+  function show(feature) {
+    tip.remove();
+    detail.setLngLat(feature.geometry.coordinates).setDOMContent(describe(feature)).addTo(map);
+  }
+
+  map.on("click", "places", (event) => show(event.features[0]));
+
+  map.on("mousemove", (event) => {
+    const hit = map.queryRenderedFeatures(event.point, { layers: ["places"] })[0];
+    map.getCanvas().style.cursor = hit ? "pointer" : "";
+    if (hit && !detail.isOpen()) {
+      tip.setLngLat(hit.geometry.coordinates).setText(hit.properties.name).addTo(map);
+    } else {
+      tip.remove();
+    }
+    const elevation = terrainElevation(event.lngLat);
+    $("readout").textContent = elevation === null
+      ? "Terrain elevation: not available (terrain off or still loading)"
+      : "Terrain elevation under cursor: " + Math.round(elevation).toLocaleString() + " m";
+  });
+
+  $("search").addEventListener("input", (event) => {
+    const feature = features.get(event.target.value);
+    if (!feature) return;
+    map.flyTo({ center: feature.geometry.coordinates, zoom: Math.max(map.getZoom(), 11), speed: 1.4 });
+    map.once("moveend", () => show(feature));
+  });
+
+  // Expose for debugging and automated checks.
+  window.viewer = { map, features, terrainElevation };
+})();
+</script>
+</body>
+</html>

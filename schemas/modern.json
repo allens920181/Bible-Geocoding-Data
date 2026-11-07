@@ -428,6 +428,9 @@
       "custom_lonlat": {
          "$ref": "#/definitions/lonlat"
       },
+      "elevation_meters": {
+         "type": "integer"
+      },
       "epsg_28191": {
          "pattern": "^-?\\d{6}/-?\\d{6}$",
          "type": "string"
