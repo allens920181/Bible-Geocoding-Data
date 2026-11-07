@@ -35,6 +35,20 @@ The data files are:
 
 The structure of the JSON is somewhat complex. Sorry!
 
+## Terrain (AWS Terrain Tiles)
+
+[AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) supply elevation data in two places:
+
+* `scripts/add_elevation.py` fills in the [`elevation_meters`](#elevation-elevation_meters) of every modern location. It needs only Python 3 and an internet connection, and caches the roughly 30 MB of tiles it downloads in `.terrain-cache/`. `python3 scripts/add_elevation.py --check` exits with status 1 if `modern.jsonl` is out of date. `scripts/terrain_tiles.py` is the reusable part: `TerrainTiles(zoom=12).elevation(lon, lat)` returns the elevation in meters at any point. Run the tests with `python3 -m unittest discover -s scripts`.
+* `viewer/index.html` is a static page that shows the locations on 3D terrain with hillshade, colored by elevation. Serve the repository root and open the page:
+
+```bash
+python3 -m http.server 8000
+# then browse to http://localhost:8000/viewer/
+```
+
+The page loads [MapLibre GL JS](https://maplibre.org/) from a CDN and its base map from OpenStreetMap's public tile server. That is fine for trying it out, but not for heavy traffic (see the [tile usage policy](https://operations.osmfoundation.org/policies/tiles/)); if you deploy the page, replace `OSM_TILES` in `viewer/index.html` with your own tile source.
+
 # Ancient places (ancient.jsonl)
 
 This file contains data about the places as mentioned in the Bible text, disambiguates them, catalogs them by verse reference, and evaluates the confidence of modern scholarship that attempts to identify ancient places with modern locations.
@@ -510,6 +524,17 @@ This object describes the source of the coordinates.
 ```
 
 For example, this object is saying the the coordinates derive from [Wikidata item Q246590](https://www.wikidata.org/wiki/Q246590). A `url` appears if one is available.
+
+## Elevation (`elevation_meters`)
+
+An integer: the elevation in meters above sea level at the point in `lonlat`. Negative numbers are below sea level (the shore of the Dead Sea is around -400).
+
+The value comes from [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) at zoom level 12 (about 33 meters per pixel at this latitude), bilinearly interpolated between the four nearest pixels. `scripts/add_elevation.py` regenerates it. Things to keep in mind:
+
+* It is the elevation of that one point. For a river, region, or other feature that isn't a point, it is the elevation of the representative point in `lonlat`, not of the feature as a whole.
+* It is only as accurate as the point. Where `precision.meters` is large, the point may be well off the intended place, and on steep terrain the elevation can be off by hundreds of meters with it.
+* For a lake it is the elevation of the water surface (the Sea of Galilee is about -213, the Dead Sea about -412). Open sea reads 0 because the zoom-12 tiles use sea level there rather than the depth of the sea floor.
+* The tiles are assembled from several public elevation datasets. The [Tilezen attribution notes](https://github.com/tilezen/joerd/blob/master/docs/attribution.md) list national datasets for some countries but none in the Middle East, where the tiles fall back on global datasets such as SRTM, a survey from around the year 2000 (so the Dead Sea's level, for example, is higher than it is today); parts of Europe use EU-DEM. Credit the underlying sources, as that page describes, if you redistribute the elevations.
 
 ## Media (`media`)
 
