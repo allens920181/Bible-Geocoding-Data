@@ -2,100 +2,355 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>Bible Places on Terrain</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%235ac8fa'/%3E%3Cstop offset='1' stop-color='%23007aff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='15' fill='url(%23g)'/%3E%3Cpath d='M9 48 26 23l9 13 6-8 14 20z' fill='%23fff'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/dist/maplibre-gl.css">
 <style>
+  /* An iOS look for a desktop browser: system colors, translucent materials, grouped lists,
+     UISwitch-style toggles. The page is meant for a computer, so there is no small-screen layout. */
   :root {
-    --panel-bg: rgba(255, 255, 255, 0.94);
-    --panel-fg: #1f2933;
-    --panel-muted: #5f6c7b;
-    --panel-line: #d5dbe3;
-    --accent: #1d5fa8;
     color-scheme: light dark;
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
+
+    --blue: #007aff;
+    --green: #34c759;
+    --red: #ff3b30;
+    --focus: rgba(0, 122, 255, 0.4);
+
+    --label: #000;
+    --label-2: rgba(60, 60, 67, 0.62);
+    --label-3: rgba(60, 60, 67, 0.32);
+    --separator: rgba(60, 60, 67, 0.2);
+    --fill: rgba(120, 120, 128, 0.2);
+    --fill-2: rgba(120, 120, 128, 0.12);
+    --switch-off: rgba(120, 120, 128, 0.3);
+
+    --material: rgba(246, 246, 248, 0.74);
+    --group: rgba(255, 255, 255, 0.64);
+    --popover: rgba(255, 255, 255, 0.92);
+    --edge: inset 0 0 0 var(--hairline) rgba(0, 0, 0, 0.07), inset 0 var(--hairline) 0 rgba(255, 255, 255, 0.75);
+    --shadow: 0 12px 40px rgba(0, 0, 0, 0.2), 0 2px 8px rgba(0, 0, 0, 0.08);
+    --blur: saturate(180%) blur(28px);
+
+    --hairline: 1px;
   }
+  @media (min-resolution: 2dppx) { :root { --hairline: 0.5px; } }
   @media (prefers-color-scheme: dark) {
     :root {
-      --panel-bg: rgba(28, 33, 40, 0.94);
-      --panel-fg: #e6ebf1;
-      --panel-muted: #9aa7b6;
-      --panel-line: #3a4452;
-      --accent: #7db4ee;
+      --blue: #0a84ff;
+      --green: #30d158;
+      --red: #ff453a;
+      --focus: rgba(10, 132, 255, 0.5);
+
+      --label: #fff;
+      --label-2: rgba(235, 235, 245, 0.62);
+      --label-3: rgba(235, 235, 245, 0.3);
+      --separator: rgba(84, 84, 88, 0.6);
+      --fill: rgba(120, 120, 128, 0.36);
+      --fill-2: rgba(120, 120, 128, 0.24);
+      --switch-off: rgba(120, 120, 128, 0.46);
+
+      --material: rgba(30, 30, 32, 0.72);
+      --group: rgba(120, 120, 128, 0.2);
+      --popover: rgba(44, 44, 46, 0.92);
+      --edge: inset 0 0 0 var(--hairline) rgba(255, 255, 255, 0.1), inset 0 var(--hairline) 0 rgba(255, 255, 255, 0.14);
+      --shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3);
     }
   }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+  [hidden] { display: none !important; }
+  * { -webkit-tap-highlight-color: transparent; }
   html, body { height: 100%; margin: 0; }
-  body { font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: #e9e6df; }
+  body {
+    font: 14px/1.4 var(--font); color: var(--label); background: #e9e6df;
+    -webkit-font-smoothing: antialiased; font-synthesis: none;
+  }
+  button { font: inherit; color: inherit; }
   #map { position: absolute; inset: 0; }
+
+  /* ---- Sidebar -------------------------------------------------------------------------- */
 
   #panel {
     position: absolute; top: 12px; left: 12px; z-index: 2;
-    width: min(320px, calc(100vw - 24px)); box-sizing: border-box;
-    background: var(--panel-bg); color: var(--panel-fg);
-    border-radius: 8px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.28);
-    max-height: calc(100vh - 24px); overflow: auto;
+    width: 340px; box-sizing: border-box; padding: 16px 16px 14px;
+    max-height: calc(100vh - 24px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin;
+    background: var(--material); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+    border-radius: 22px; box-shadow: var(--shadow), var(--edge);
   }
-  #panel summary { cursor: pointer; padding: 10px 14px; font-weight: 600; }
-  #panel .body { padding: 0 14px 14px; }
-  #panel label { display: block; }
-  .row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
-  .row input[type="checkbox"] { margin: 0; }
-  .field { margin-top: 10px; }
-  .field > span { display: block; color: var(--panel-muted); font-size: 12px; margin-bottom: 3px; }
-  #search { width: 100%; box-sizing: border-box; padding: 7px 9px; font: inherit; color: inherit;
-            background: transparent; border: 1px solid var(--panel-line); border-radius: 6px; }
-  #exaggeration { width: 100%; }
-  #legend-bar { height: 10px; border-radius: 5px; border: 1px solid var(--panel-line); }
-  #legend-ticks { position: relative; height: 16px; margin-top: 2px; font-size: 11px; color: var(--panel-muted); }
+  .panel-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 2px 2px 0; }
+  h1 { margin: 0; font: 700 26px/32px var(--font); letter-spacing: 0.3px; }
+  #status { margin: 1px 0 0; min-height: 18px; font-size: 13px; line-height: 18px; color: var(--label-2); }
+  #status.error { color: var(--red); }
+  #panel-body { margin-top: 14px; }
+  #panel.collapsed { padding-bottom: 12px; }
+  #panel.collapsed #panel-body { display: none; }
+
+  .icon-button {
+    flex: none; display: grid; place-items: center; width: 30px; height: 30px; padding: 0; margin-top: 1px;
+    border: 0; border-radius: 50%; background: var(--fill-2); color: var(--label-2); cursor: pointer;
+    transition: background 0.15s, opacity 0.15s;
+  }
+  .icon-button:hover { background: var(--fill); }
+  .icon-button:active { opacity: 0.6; }
+  .icon-button svg { width: 16px; height: 16px; }
+  :is(.icon-button, .switch, .search-field input, .link):focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; }
+
+  /* Search field, like UISearchBar, with its results in a popover underneath. */
+  .search { position: relative; }
+  .search-field {
+    display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 8px; box-sizing: border-box;
+    border-radius: 10px; background: var(--fill-2); color: var(--label-2); transition: box-shadow 0.15s;
+  }
+  .search-field:focus-within { box-shadow: 0 0 0 3px var(--focus); }
+  .search-field > svg { flex: none; width: 16px; height: 16px; }
+  .search-field input {
+    flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; outline: 0; background: transparent;
+    font: 15px/1 var(--font); color: var(--label); -webkit-appearance: none; appearance: none;
+  }
+  .search-field input:focus-visible { outline: 0; }
+  .search-field input::placeholder { color: var(--label-2); }
+  .search-field input::-webkit-search-cancel-button { display: none; }
+  #search-clear { width: 20px; height: 20px; margin: 0; background: none; color: var(--label-3); }
+  #search-clear:hover { background: none; color: var(--label-2); }
+  #search-clear svg { width: 18px; height: 18px; }
+  #search-clear path { stroke: #fff; }
+  @media (prefers-color-scheme: dark) { #search-clear path { stroke: #2c2c2e; } }
+
+  #results {
+    position: absolute; z-index: 10; top: calc(100% + 6px); left: 0; right: 0; margin: 0; padding: 4px; list-style: none;
+    background: var(--popover); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+    border-radius: 14px; box-shadow: var(--shadow), var(--edge);
+    max-height: 344px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin;
+  }
+  #results li {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 7px 10px; border-radius: 9px; font-size: 14px; line-height: 18px; cursor: default;
+  }
+  #results li .name {                                       /* two lines at most; the full name is in the tooltip */
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere;
+  }
+  #results li .detail { flex: none; font-size: 12px; color: var(--label-2); font-variant-numeric: tabular-nums; }
+  #results li.active { background: var(--blue); color: #fff; }
+  #results li.active .detail { color: rgba(255, 255, 255, 0.78); }
+  #results li.empty { color: var(--label-2); justify-content: center; }
+  #results li.more { display: block; padding: 8px 10px 6px; font-size: 12px; text-align: center; color: var(--label-2); }
+
+  /* Inset grouped lists */
+  .group-title {
+    margin: 18px 0 6px 14px; font: 400 12px/16px var(--font); letter-spacing: 0.2px;
+    text-transform: uppercase; color: var(--label-2);
+  }
+  .group { background: var(--group); border-radius: 12px; overflow: hidden; }
+  .group > * { position: relative; }
+  .group > :not(:last-child)::after {                     /* hairline separator, inset like UITableView */
+    content: ""; position: absolute; left: 14px; right: 0; bottom: 0; height: var(--hairline); background: var(--separator);
+  }
+  .row {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    min-height: 44px; padding: 0 14px; box-sizing: border-box; font-size: 15px;
+  }
+  .row .value { color: var(--label-2); font-variant-numeric: tabular-nums; text-align: right; }
+
+  /* UISwitch */
+  .switch {
+    -webkit-appearance: none; appearance: none; position: relative; flex: none; margin: 0;
+    width: 46px; height: 28px; border-radius: 14px; background: var(--switch-off); cursor: pointer;
+    transition: background 0.25s;
+  }
+  .switch::before {
+    content: ""; position: absolute; top: 2px; left: 2px; width: 24px; height: 24px; border-radius: 12px; background: #fff;
+    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15), 0 1px 1px rgba(0, 0, 0, 0.16), 0 3px 1px rgba(0, 0, 0, 0.1);
+    transition: transform 0.25s cubic-bezier(0.3, 0.7, 0.4, 1), width 0.2s;
+  }
+  .switch:checked { background: var(--green); }
+  .switch:checked::before { transform: translateX(18px); }
+  .switch:active::before { width: 29px; }
+  .switch:checked:active::before { transform: translateX(13px); }
+
+  /* UISlider */
+  .slider-row { display: block; padding: 9px 14px 8px; font-size: 15px; }
+  .slider-row .head { display: flex; justify-content: space-between; align-items: baseline; }
+  .slider-row output { color: var(--label-2); font-variant-numeric: tabular-nums; }
+  input[type="range"] {
+    --p: 25;                                               /* position in percent, set from script */
+    -webkit-appearance: none; appearance: none; display: block; width: 100%; height: 28px; margin: 2px 0 0;
+    background: transparent; cursor: pointer;
+  }
+  input[type="range"]:disabled { opacity: 0.4; cursor: default; }
+  input[type="range"]:focus-visible { outline: 0; }
+  input[type="range"]::-webkit-slider-runnable-track {
+    height: 4px; border-radius: 2px;
+    background: linear-gradient(to right, var(--blue) calc(var(--p) * 1% + (50 - var(--p)) * 0.24px), var(--switch-off) 0);
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 24px; height: 24px; margin-top: -10px; border-radius: 50%; background: #fff; border: 0;
+    box-shadow: 0 0 0 var(--hairline) rgba(0, 0, 0, 0.06), 0 3px 8px rgba(0, 0, 0, 0.15), 0 1px 1px rgba(0, 0, 0, 0.16), 0 3px 1px rgba(0, 0, 0, 0.1);
+  }
+  input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 4px var(--focus), 0 3px 8px rgba(0, 0, 0, 0.15); }
+  input[type="range"]::-moz-range-track { height: 4px; border-radius: 2px; background: var(--switch-off); }
+  input[type="range"]::-moz-range-progress { height: 4px; border-radius: 2px; background: var(--blue); }
+  input[type="range"]::-moz-range-thumb {
+    width: 24px; height: 24px; border: 0; border-radius: 50%; background: #fff;
+    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15), 0 1px 1px rgba(0, 0, 0, 0.16);
+  }
+
+  .legend { padding: 12px 14px 8px; }
+  #legend-bar { height: 8px; border-radius: 4px; box-shadow: inset 0 0 0 var(--hairline) rgba(0, 0, 0, 0.12); }
+  #legend-ticks { position: relative; height: 16px; margin-top: 4px; font-size: 11px; color: var(--label-2); font-variant-numeric: tabular-nums; }
   #legend-ticks span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
   #legend-ticks span:first-child { transform: none; }            /* keep the end labels inside the bar */
   #legend-ticks span:last-child { transform: translateX(-100%); }
-  #readout, #status { color: var(--panel-muted); font-size: 12px; margin-top: 10px; min-height: 1.4em; }
-  #status.error { color: #c0392b; }
-  #panel a { color: var(--accent); }
 
-  .maplibregl-popup-content { font: 13px/1.4 system-ui, sans-serif; padding: 9px 12px; color: #1f2933; }
-  .maplibregl-popup-content h3 { margin: 0 0 2px; font-size: 14px; }
-  .maplibregl-popup-content .meta { color: #5f6c7b; }
-  .hover-tip .maplibregl-popup-content { padding: 4px 8px; pointer-events: none; }
+  .footnote { margin: 14px 14px 0; font-size: 12px; line-height: 16px; color: var(--label-2); }
+  a { color: var(--blue); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* ---- MapLibre controls, restyled as iOS materials -------------------------------------- */
+
+  .maplibregl-ctrl-group:not(:empty) {
+    border-radius: 12px; overflow: hidden; background: var(--material);
+    -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+    box-shadow: var(--shadow), var(--edge);
+  }
+  .maplibregl-ctrl-group button { width: 34px; height: 34px; transition: background 0.15s; }
+  .maplibregl-ctrl-group button + button { border-top: var(--hairline) solid var(--separator); }
+  .maplibregl-ctrl-group button:not(:disabled):hover { background-color: var(--fill-2); }
+  .maplibregl-ctrl-group button:not(:disabled):active { background-color: var(--fill); }
+  @media (prefers-color-scheme: dark) { .maplibregl-ctrl-icon { filter: invert(1); } }
+
+  .maplibregl-ctrl-scale {
+    background: var(--material); color: var(--label); border-color: var(--label-2); border-radius: 0 0 4px 4px;
+    font: 10px/1.4 var(--font); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+  }
+  .maplibregl-ctrl-attrib.maplibregl-compact, .maplibregl-ctrl-attrib {
+    background: var(--material); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+    border-radius: 12px; box-shadow: var(--edge); font: 11px/1.4 var(--font); color: var(--label-2);
+  }
+  .maplibregl-ctrl-attrib a { color: var(--label-2); }
+  @media (prefers-color-scheme: dark) { .maplibregl-ctrl-attrib-button { filter: invert(1); } }
+
+  /* ---- Place card, docked at the bottom right ---------------------------------------------- */
+
+  #dock {
+    position: absolute; right: 12px; bottom: 44px; z-index: 2;       /* just above the attribution */
+    width: 300px; box-sizing: border-box; padding: 16px 16px 16px;
+    background: var(--material); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+    border-radius: 20px; box-shadow: var(--shadow), var(--edge);
+    opacity: 0; visibility: hidden; transform: translateY(10px); pointer-events: none;
+    transition: opacity 0.2s, transform 0.25s cubic-bezier(0.3, 0.7, 0.4, 1), visibility 0s 0.25s;
+  }
+  #dock.visible { opacity: 1; visibility: visible; transform: none; transition-delay: 0s; }
+  #dock.pinned { pointer-events: auto; padding-bottom: 6px; }      /* hovering only previews; a click pins it */
+  .dock-close { position: absolute; top: 14px; right: 14px; width: 22px; height: 22px; margin: 0; }
+  .dock-close svg { width: 9px; height: 9px; }
+  #dock:not(.pinned) .dock-close { display: none; }
+
+  .callout h3 { margin: 0 28px 0 0; font: 600 17px/22px var(--font); letter-spacing: -0.2px; }
+  .callout .subtitle { margin: 1px 0 12px; font-size: 13px; color: var(--label-2); }
+  .callout dl { margin: 0; background: var(--fill-2); border-radius: 10px; }
+  .callout .fact { position: relative; display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px; font-size: 13px; }
+  .callout .fact:not(:last-child)::after {
+    content: ""; position: absolute; left: 12px; right: 0; bottom: 0; height: var(--hairline); background: var(--separator);
+  }
+  .callout dt { color: var(--label-2); }
+  .callout dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+  .callout .link {
+    display: flex; justify-content: space-between; margin: 4px -4px 8px; padding: 9px 12px; border-radius: 10px;
+    font-size: 14px; transition: background 0.15s;
+  }
+  .callout .link:hover { text-decoration: none; background: var(--fill-2); }
+  .callout .link:focus-visible { outline-offset: 0; }
+  .callout .link::after { content: "↗"; }
+
+  /* ---- Names beside the dots of a small search -------------------------------------------- */
+
+  .place-pin { width: 0; height: 0; pointer-events: none; }
+  .place-label {
+    position: absolute; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font: 600 12px/16px var(--font); letter-spacing: -0.1px; color: #1c1c1e;
+    text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff, 0 0 4px #fff;   /* white halo, as in Apple Maps */
+  }
+  .place-label.pos-r { left: 12px; top: -8px; }
+  .place-label.pos-l { right: 12px; top: -8px; }
+  .place-label.pos-t { left: 0; bottom: 12px; transform: translateX(-50%); }
+  .place-label.pos-b { left: 0; top: 12px; transform: translateX(-50%); }
+  .place-label.hidden { visibility: hidden; }
+  .place-label.focus { color: #0066d6; }
 </style>
 </head>
 <body>
 <div id="map"></div>
 
-<details id="panel" open>
-  <summary>Bible places on terrain</summary>
-  <div class="body">
-    <label class="field">
-      <span>Find a place</span>
-      <input id="search" type="search" list="place-list" placeholder="e.g. Mount Zion" autocomplete="off">
-      <datalist id="place-list"></datalist>
-    </label>
+<aside id="panel" aria-label="Map controls">
+  <div class="panel-header">
+    <div>
+      <h1>Bible Places</h1>
+      <p id="status" role="status">Loading places…</p>
+    </div>
+    <button id="panel-toggle" class="icon-button" type="button" aria-expanded="true" aria-controls="panel-body" title="Hide sidebar">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true">
+        <rect x="1.7" y="2.7" width="12.6" height="10.6" rx="2.4"/><path d="M6.2 3v10" stroke-linecap="round"/>
+      </svg>
+    </button>
+  </div>
 
-    <div class="field">
-      <span>Map</span>
-      <label class="row"><input id="toggle-terrain" type="checkbox" checked> 3D terrain</label>
-      <label class="row"><input id="toggle-hillshade" type="checkbox" checked> Hillshade</label>
-      <label class="row"><input id="toggle-osm" type="checkbox" checked> OpenStreetMap base</label>
+  <div id="panel-body">
+    <div class="search">
+      <div class="search-field">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+          <circle cx="6.8" cy="6.8" r="4.6"/><path d="m10.3 10.3 3.6 3.6"/>
+        </svg>
+        <input id="search" type="search" role="combobox" aria-label="Search places" aria-autocomplete="list"
+               aria-expanded="false" aria-controls="results" placeholder="Search places" autocomplete="off" spellcheck="false">
+        <button id="search-clear" class="icon-button" type="button" aria-label="Clear search" hidden>
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <circle cx="10" cy="10" r="8.5" fill="currentColor"/>
+            <path d="m7 7 6 6m0-6-6 6" fill="none" stroke-width="1.7" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+      <ul id="results" role="listbox" aria-label="Matching places" hidden></ul>
     </div>
 
-    <label class="field">
-      <span>Vertical exaggeration: <output id="exaggeration-value">1.5×</output></span>
-      <input id="exaggeration" type="range" min="1" max="4" step="0.5" value="1.5">
-    </label>
+    <h2 class="group-title">Layers</h2>
+    <div class="group">
+      <label class="row"><span>3D terrain</span><input id="toggle-terrain" class="switch" type="checkbox" role="switch" checked></label>
+      <label class="row"><span>Hillshade</span><input id="toggle-hillshade" class="switch" type="checkbox" role="switch" checked></label>
+      <label class="row"><span>Flat water</span><input id="toggle-flatwater" class="switch" type="checkbox" role="switch" checked></label>
+      <label class="row"><span>OpenStreetMap base</span><input id="toggle-osm" class="switch" type="checkbox" role="switch" checked></label>
+    </div>
 
-    <div class="field">
-      <span>Elevation of each place (m)</span>
+    <h2 class="group-title">Relief</h2>
+    <div class="group">
+      <label class="slider-row">
+        <span class="head"><span>Vertical exaggeration</span><output id="exaggeration-value">1.5×</output></span>
+        <input id="exaggeration" type="range" min="1" max="4" step="0.5" value="1.5">
+      </label>
+      <div class="row" title="Terrain elevation under the cursor">
+        <span>Under cursor</span><output id="readout" class="value" aria-live="off">Move over the map</output>
+      </div>
+    </div>
+
+    <h2 class="group-title">Elevation of each place (m)</h2>
+    <div class="group legend">
       <div id="legend-bar"></div>
       <div id="legend-ticks"></div>
     </div>
 
-    <div id="readout" aria-live="off">Move the cursor over the map for the terrain elevation.</div>
-    <div id="status" role="status">Loading places…</div>
-    <p style="margin: 10px 0 0; font-size: 12px; color: var(--panel-muted)">
+    <p class="footnote">
       Data: <a href="https://www.openbible.info/geo/">OpenBible.info</a>, CC BY 4.0.
     </p>
   </div>
-</details>
+</aside>
+
+<aside id="dock" aria-label="Place details">
+  <button id="dock-close" class="icon-button dock-close" type="button" aria-label="Close" title="Close (Esc)">
+    <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="m1.5 1.5 7 7m0-7-7 7"/></svg>
+  </button>
+  <div id="dock-content"></div>
+</aside>
 
 <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
 <script>
@@ -106,13 +361,18 @@
 
   // AWS Terrain Tiles, Terrarium encoding: elevation = R*256 + G + B/256 - 32768.
   // https://registry.opendata.aws/terrain-tiles/
-  const TERRAIN_TILES = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
+  const TERRARIUM_TILES = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
+  const FLAT_WATER_TILES = "flatwater://{z}/{x}/{y}";  // the same tiles with the seas levelled; see "Flat water" below
+  const SEABED_TILES = "seabed://{z}/{x}/{y}";         // ... and as AWS sent them, sea floor included
   const TERRAIN_ATTRIBUTION =
     '<a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noopener">AWS Terrain Tiles</a> ' +
     '(<a href="https://github.com/tilezen/joerd/blob/master/docs/attribution.md" target="_blank" rel="noopener">sources</a>)';
   const OSM_TILES = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
   const DATA_URL = "../data/modern.jsonl";   // relative to this page; serve the repository root
   const PLACE_URL = "https://www.openbible.info/geo/modern/";
+  const RESULT_LIMIT = 50;     // rows in the results list; the map shows every match
+  const LABEL_LIMIT = 40;      // name the dots on the map when a search leaves this many or fewer
+  const FIT_PADDING = { top: 90, right: 90, bottom: 90, left: 400 };   // keeps matches clear of the sidebar
 
   // Place colors by elevation, shared by the map layer and the legend. Viridis-like,
   // so it stays readable for color-blind viewers and against any background.
@@ -121,6 +381,115 @@
     [600, "#22a884"], [1200, "#7ad151"], [2400, "#fde725"],
   ];
   const NO_ELEVATION_COLOR = "#9aa0a6";
+
+  // Dot size by zoom (zoom, radius in px); `extra` widens it, e.g. for the soft shadow drawn underneath.
+  const RADIUS_STOPS = [[4, 3], [8, 5], [12, 7.5]];
+  const placeRadius = (extra) => ["interpolate", ["linear"], ["zoom"], ...RADIUS_STOPS.flatMap(([zoom, radius]) => [zoom, radius + extra])];
+  function dotRadius(zoom, extra) {         // the same curve as a number
+    const last = RADIUS_STOPS.length - 1;
+    if (zoom <= RADIUS_STOPS[0][0]) return RADIUS_STOPS[0][1] + extra;
+    for (let i = 1; i <= last; i++) {
+      if (zoom <= RADIUS_STOPS[i][0]) {
+        const [z0, r0] = RADIUS_STOPS[i - 1], [z1, r1] = RADIUS_STOPS[i];
+        return r0 + (r1 - r0) * (zoom - z0) / (z1 - z0) + extra;
+      }
+    }
+    return RADIUS_STOPS[last][1] + extra;
+  }
+
+  // ---- Flat water ---------------------------------------------------------
+  // Below zoom 12 the AWS tiles carry sea-floor depths, and from zoom 12 up they say a flat 0 m (open
+  // sea off Tel Aviv: about -500 m at zoom 9, 0 m at zoom 12). Used as they are, a sea is drawn as a pit
+  // that suddenly fills up as you zoom in, with the sea floor's relief shaded across the water. So each
+  // tile is rewritten on its way in: every pixel below sea level becomes exactly 0 m, except land that
+  // really lies below sea level, which keeps its true height.
+  const BELOW_SEA_LEVEL_LAND = [        // [west, south, east, north], in degrees
+    [35.0, 30.3, 36.0, 32.6],           // Jordan Rift, south: the Dead Sea (down to -430 m) and Wadi Arabah
+    [35.2, 32.6, 36.0, 33.05],          // Jordan Rift, north: Sea of Galilee (-213 m) and the Jordan Valley
+    [26.4, 29.4, 29.2, 30.85],          // Qattara Depression, Egypt (down to -133 m)
+  ];
+
+  // Those boxes in the pixels of tile z/x/y: [left, top, right, bottom], only those that touch it.
+  function landBelowSeaLevel(z, x, y, width, height) {
+    const n = 2 ** z;
+    const toX = (lon) => ((lon + 180) / 360 * n - x) * width;
+    const toY = (lat) => {
+      const sine = Math.sin(lat * Math.PI / 180);
+      return ((0.5 - Math.log((1 + sine) / (1 - sine)) / (4 * Math.PI)) * n - y) * height;
+    };
+    return BELOW_SEA_LEVEL_LAND.map(([west, south, east, north]) => [toX(west), toY(north), toX(east), toY(south)])
+      .filter(([left, top, right, bottom]) => right > 0 && left < width && bottom > 0 && top < height);
+  }
+
+  const makeCanvas = (width, height) => typeof OffscreenCanvas === "function"
+    ? new OffscreenCanvas(width, height)
+    : Object.assign(document.createElement("canvas"), { width, height });
+  const canvasToBlob = (canvas) => canvas.convertToBlob
+    ? canvas.convertToBlob({ type: "image/png" })
+    : new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+
+  // A Terrarium pixel is R*256 + G + B/256 - 32768 metres, so R below 128 means below sea level, and
+  // (128, 0, 0) is exactly 0 m. Returns the PNG bytes, untouched when nothing in the tile was below sea level.
+  async function levelSeas(png, z, x, y) {
+    const bitmap = await createImageBitmap(new Blob([png], { type: "image/png" }),
+      { premultiplyAlpha: "none", colorSpaceConversion: "none" });           // keep the values exactly as stored
+    const { width, height } = bitmap;
+    const context = makeCanvas(width, height).getContext("2d", { willReadFrequently: true });
+    context.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    const image = context.getImageData(0, 0, width, height);
+    const pixels = image.data;
+    const land = landBelowSeaLevel(z, x, y, width, height);
+    let changed = false;
+    for (let row = 0; row < height; row++) {
+      for (let column = 0; column < width; column++) {
+        const at = (row * width + column) * 4;
+        if (pixels[at] >= 128) continue;                                      // 0 m or higher
+        if (land.some(([left, top, right, bottom]) => column >= left && column < right && row >= top && row < bottom)) continue;
+        pixels[at] = 128; pixels[at + 1] = 0; pixels[at + 2] = 0;
+        changed = true;
+      }
+    }
+    if (!changed) return png;
+    context.putImageData(image, 0, 0);
+    return (await canvasToBlob(context.canvas)).arrayBuffer();
+  }
+
+  // Two views of the same tiles: flatwater:// has the seas levelled, seabed:// is what AWS sent. The
+  // switch in the sidebar picks one by changing the tile URLs of the terrain and hillshade sources.
+  // A tile is downloaded once, and rewritten once, however many sources and switch positions ask for it.
+  const remember = (cache, key, make) => {                                    // a small cache of promises
+    if (!cache.has(key)) {
+      const promise = make();
+      promise.catch(() => cache.delete(key));                                  // a failed download can be retried
+      cache.set(key, promise);
+      if (cache.size > 150) cache.delete(cache.keys().next().value);
+    }
+    return cache.get(key);
+  };
+  const downloaded = new Map();                                               // "z/x/y" -> Promise<ArrayBuffer>, as AWS sent it
+  const levelled = new Map();                                                 // "z/x/y" -> Promise<ArrayBuffer>, seas flat
+  let levelingFailed = false;                                                 // warn once, not once per tile
+
+  const seabedTile = (z, x, y) => remember(downloaded, z + "/" + x + "/" + y, () =>
+    fetch(TERRARIUM_TILES.replace("{z}", z).replace("{x}", x).replace("{y}", y)).then((response) => {
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      return response.arrayBuffer();
+    }));
+  const flatTile = (z, x, y) => remember(levelled, z + "/" + x + "/" + y, async () => {
+    const png = await seabedTile(z, x, y);
+    try {
+      return await levelSeas(png, z, x, y);
+    } catch (error) {                                                         // never lose the tile over this
+      if (!levelingFailed) console.warn("Could not level the seas (" + error.message + "); showing the tiles as they are.");
+      levelingFailed = true;
+      return png;
+    }
+  });
+
+  const tileOf = (url) => url.match(/^\w+:\/\/(\d+)\/(\d+)\/(\d+)/).slice(1).map(Number);
+  maplibregl.addProtocol("flatwater", async (request) => ({ data: (await flatTile(...tileOf(request.url))).slice(0) }));
+  maplibregl.addProtocol("seabed", async (request) => ({ data: (await seabedTile(...tileOf(request.url))).slice(0) }));
 
   // ---- Map ----------------------------------------------------------------
 
@@ -135,29 +504,36 @@
                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors' },
         // Two sources with the same tiles: MapLibre recommends keeping the hillshade's
         // DEM separate from the terrain's, so the two can be requested at different zooms.
-        "terrain-dem": { type: "raster-dem", tiles: [TERRAIN_TILES], tileSize: 256, maxzoom: 15,
+        "terrain-dem": { type: "raster-dem", tiles: [FLAT_WATER_TILES], tileSize: 256, maxzoom: 15,
                          encoding: "terrarium", attribution: TERRAIN_ATTRIBUTION },
-        "hillshade-dem": { type: "raster-dem", tiles: [TERRAIN_TILES], tileSize: 256, maxzoom: 15,
+        "hillshade-dem": { type: "raster-dem", tiles: [FLAT_WATER_TILES], tileSize: 256, maxzoom: 15,
                            encoding: "terrarium" },
         places: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
       },
       layers: [
         { id: "background", type: "background", paint: { "background-color": "#e9e6df" } },
-        { id: "osm", type: "raster", source: "osm" },
+        // A little desaturated, so the colored dots stand out the way they do in Apple Maps.
+        { id: "osm", type: "raster", source: "osm", paint: { "raster-saturation": -0.25 } },
         { id: "hillshade", type: "hillshade", source: "hillshade-dem",
           paint: { "hillshade-exaggeration": 0.55, "hillshade-shadow-color": "#3d3223",
                    "hillshade-highlight-color": "#ffffff", "hillshade-accent-color": "#6b5b3e" } },
+        { id: "places-shadow", type: "circle", source: "places",
+          paint: { "circle-radius": placeRadius(1.5), "circle-color": "#000", "circle-opacity": 0.3,
+                   "circle-blur": 0.8, "circle-translate": [0, 1.5] } },
         { id: "places", type: "circle", source: "places",
           paint: {
-            "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 2.5, 8, 4.5, 12, 7],
+            "circle-radius": placeRadius(0),
             "circle-color": ["case", ["has", "elevation_meters"],
               ["interpolate", ["linear"], ["get", "elevation_meters"],
                 ...ELEVATION_STOPS.flat()],
               NO_ELEVATION_COLOR],
-            "circle-stroke-color": "#15181c",
-            "circle-stroke-width": 1,
-            "circle-opacity": 0.95,
+            "circle-stroke-color": "#ffffff",
+            "circle-stroke-width": 1.5,
           } },
+        // Ring around the place the card describes; the filter is set from script.
+        { id: "places-focus", type: "circle", source: "places", filter: ["==", ["get", "id"], ""],
+          paint: { "circle-radius": placeRadius(5), "circle-color": "rgba(0, 0, 0, 0)",
+                   "circle-stroke-color": "#0a84ff", "circle-stroke-width": 3 } },
       ],
     },
     center: [35.35, 31.75],
@@ -172,8 +548,9 @@
   map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-left");
 
   function applyTerrain() {
-    const on = document.getElementById("toggle-terrain").checked;
+    const on = $("toggle-terrain").checked;
     map.setTerrain(on ? { source: "terrain-dem", exaggeration: state.exaggeration } : null);
+    $("exaggeration").disabled = !on;
   }
 
   map.on("load", () => {
@@ -183,7 +560,11 @@
 
   let warned = false;
   map.on("error", (event) => {
-    console.error(event.error || event);
+    const error = event.error;
+    // A request cancelled because the view or a source changed (the Flat water switch, a fast pan)
+    // is not a failure. MapLibre's own cancellations are Errors whose message is "AbortError".
+    if (error && (error.name === "AbortError" || error.message === "AbortError")) return;
+    console.error(error || event);
     if (!warned && event.sourceId) {
       warned = true;
       setStatus("Some map tiles failed to load; check your connection.", true);
@@ -192,7 +573,7 @@
 
   // ---- Controls -----------------------------------------------------------
 
-  const $ = (id) => document.getElementById(id);
+  function $(id) { return document.getElementById(id); }
   function setStatus(text, isError) {
     const status = $("status");
     status.textContent = text;
@@ -214,12 +595,29 @@
   $("toggle-terrain").addEventListener("change", applyTerrain);
   $("toggle-hillshade").addEventListener("change", (e) => setVisible("hillshade", e.target.checked));
   $("toggle-osm").addEventListener("change", (e) => setVisible("osm", e.target.checked));
+  $("toggle-flatwater").addEventListener("change", (e) => {       // levelled seas, or the sea floor as AWS has it
+    const tiles = [e.target.checked ? FLAT_WATER_TILES : SEABED_TILES];
+    map.getSource("terrain-dem").setTiles(tiles);
+    map.getSource("hillshade-dem").setTiles(tiles);
+  });
+
+  function paintSlider() {
+    const slider = $("exaggeration");
+    slider.style.setProperty("--p", ((slider.value - slider.min) / (slider.max - slider.min)) * 100);
+  }
   $("exaggeration").addEventListener("input", (e) => {
     state.exaggeration = Number(e.target.value);
     $("exaggeration-value").textContent = state.exaggeration + "×";
+    paintSlider();
     if ($("toggle-terrain").checked) applyTerrain();
   });
-  if (window.innerWidth < 600) $("panel").open = false;   // leave the map visible on phones
+  paintSlider();
+
+  $("panel-toggle").addEventListener("click", () => {
+    const collapsed = $("panel").classList.toggle("collapsed");
+    $("panel-toggle").setAttribute("aria-expanded", String(!collapsed));
+    $("panel-toggle").title = collapsed ? "Show sidebar" : "Hide sidebar";
+  });
 
   // Legend: a CSS gradient whose stops sit at the same elevations as the map layer's.
   (function buildLegend() {
@@ -240,6 +638,44 @@
   // ---- Places -------------------------------------------------------------
 
   const features = new Map();   // search label -> GeoJSON feature
+  const byId = new Map();       // place id -> GeoJSON feature, with exact coordinates
+  let matches = null;           // null: every place is shown; else the places the search field matches
+  let summary = "";             // the status line when nothing is searched, e.g. "1,596 places"
+  let totalPlaces = 0;
+  let dotBoost = 0;             // extra dot radius while a search is showing
+  let allPlaces = [];           // every place, in file order
+  const searchIndex = [];       // { feature, name, detail, key } for the results list
+
+  // Lower-case and drop accents, so "beth shean" finds "Bêth-Shean".
+  const fold = (text) => text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+  // How well a (folded) name matches the (folded) text, best first: the whole name; a name that starts
+  // with it as a whole word ("Mount Carmel" for "mount"); one that merely starts with it ("Mountains
+  // southwest of ..."); a word inside the name; anywhere in the name. -1 when it doesn't match.
+  const isWordChar = (ch) => /[a-z0-9]/.test(ch);
+  function matchRank(key, query) {
+    const at = key.indexOf(query);
+    if (at < 0) return -1;
+    const end = at + query.length;
+    const wholeWord = end === key.length || !isWordChar(key[end]);
+    if (key === query) return 0;
+    if (at === 0) return wholeWord ? 1 : 2;
+    if (!isWordChar(key[at - 1])) return wholeWord ? 3 : 4;
+    return 5;
+  }
+
+  // The places whose names match the text, best first. Shorter names win ties: they are more specific.
+  function searchItems(text) {
+    const query = fold(text.trim()).replace(/\s+/g, " ");
+    if (!query) return [];
+    const ranked = [];
+    for (const item of searchIndex) {
+      const rank = matchRank(item.key, query);
+      if (rank >= 0) ranked.push({ item, rank });
+    }
+    ranked.sort((a, b) => a.rank - b.rank || a.item.key.length - b.item.key.length || (a.item.key < b.item.key ? -1 : 1));
+    return ranked.map((entry) => entry.item);
+  }
 
   async function loadPlaces() {
     let text;
@@ -266,36 +702,51 @@
       collection.features.push({ type: "Feature", properties, geometry: { type: "Point", coordinates: [lon, lat] } });
     }
     map.getSource("places").setData(collection);
+    allPlaces = collection.features;
 
     // Search list. Several locations can share a name, so disambiguate by type, then by id.
-    const options = document.createDocumentFragment();
     for (const feature of collection.features) {
       const p = feature.properties;
       let label = p.name + " (" + p.type + ")";
       if (features.has(label)) label += " " + p.id;
       features.set(label, feature);
-      const option = document.createElement("option");
-      option.value = label;
-      options.appendChild(option);
+      byId.set(p.id, feature);
+      searchIndex.push({
+        feature, name: p.name, key: fold(p.name),
+        detail: p.type + ("elevation_meters" in p ? " · " + p.elevation_meters.toLocaleString() + " m" : ""),
+      });
     }
-    $("place-list").appendChild(options);
 
     const withElevation = collection.features.filter((f) => "elevation_meters" in f.properties).length;
-    setStatus(collection.features.length.toLocaleString() + " places" +
-      (withElevation < collection.features.length
-        ? " (" + withElevation + " with a stored elevation; run scripts/add_elevation.py for the rest)" : ""));
+    totalPlaces = collection.features.length;
+    summary = totalPlaces.toLocaleString() + " places" +
+      (withElevation < totalPlaces
+        ? " (" + withElevation + " with a stored elevation; run scripts/add_elevation.py for the rest)" : "");
+    setStatus(summary);
+    if (searchBox.value) applyMatches(matchesFor(searchBox.value));   // typed before the data arrived
   }
 
-  function describe(feature) {
+  function fact(label, value) {
+    const row = document.createElement("div");
+    row.className = "fact";
+    const term = document.createElement("dt");
+    term.textContent = label;
+    const description = document.createElement("dd");
+    description.textContent = value;
+    row.append(term, description);
+    return row;
+  }
+
+  // `full` adds the coordinates and the link; the hover preview leaves them out.
+  function describe(feature, full) {
     const p = feature.properties;
     const root = document.createElement("div");
+    root.className = "callout";
 
     const title = document.createElement("h3");
     title.textContent = p.name;
     root.appendChild(title);
 
-    const meta = document.createElement("div");
-    meta.className = "meta";
     const [lon, lat] = feature.geometry.coordinates;
     let elevation = p.elevation_meters;
     let source = "";
@@ -303,57 +754,371 @@
       const live = terrainElevation(feature.geometry.coordinates);
       if (live !== null) { elevation = Math.round(live); source = " (terrain tiles)"; }
     }
-    meta.textContent = p.type + (p.water ? " · water" : "") + " · " +
-      (elevation === undefined ? "elevation unknown" : elevation.toLocaleString() + " m" + source);
-    root.appendChild(meta);
 
-    const coordinates = document.createElement("div");
-    coordinates.className = "meta";
-    coordinates.textContent = lat.toFixed(5) + "°, " + lon.toFixed(5) + "°";
-    root.appendChild(coordinates);
+    const subtitle = document.createElement("div");
+    subtitle.className = "subtitle";
+    subtitle.textContent = p.type + (p.water ? " · water" : "");
+    root.appendChild(subtitle);
+
+    const facts = document.createElement("dl");
+    facts.append(fact("Elevation", elevation === undefined ? "Unknown" : elevation.toLocaleString() + " m" + source));
+    if (full) facts.append(fact("Location", lat.toFixed(5) + "°, " + lon.toFixed(5) + "°"));
+    root.appendChild(facts);
+    if (!full) return root;
 
     const link = document.createElement("a");
+    link.className = "link";
     link.href = PLACE_URL + encodeURIComponent(p.id) + "/" + encodeURIComponent(p.slug);
     link.target = "_blank";
     link.rel = "noopener";
-    link.textContent = "Open on OpenBible.info ↗";
+    link.textContent = "Open on OpenBible.info";
     root.appendChild(link);
     return root;
   }
 
-  const detail = new maplibregl.Popup({ offset: 12, maxWidth: "280px" });
-  const tip = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 12, className: "hover-tip" });
+  // ---- Place card, docked at the bottom right -------------------------------------
+  // Nothing is drawn next to the dots: hovering a place previews it in the card, clicking (or
+  // searching) pins it, and the dot it describes gets a blue ring.
 
-  function show(feature) {
-    tip.remove();
-    detail.setLngLat(feature.geometry.coordinates).setDOMContent(describe(feature)).addTo(map);
+  const dock = $("dock");
+  let pinned = null;      // the place opened by a click or a search
+  let hoveredId = null;   // the place under the cursor
+
+  function render(feature, isPinned) {
+    $("dock-content").replaceChildren(describe(feature, isPinned));
+    dock.classList.add("visible");
+    dock.classList.toggle("pinned", isPinned);
+    dock.setAttribute("aria-live", isPinned ? "polite" : "off");
+    map.setFilter("places-focus", ["==", ["get", "id"], feature.properties.id]);
+    markFocus(feature.properties.id);
+  }
+  function hide() {
+    dock.classList.remove("visible", "pinned");
+    map.setFilter("places-focus", ["==", ["get", "id"], ""]);
+    markFocus(null);
+  }
+  function show(feature) { pinned = feature; render(feature, true); }
+  function close() { pinned = null; hide(); }
+
+  // Which place is under the pointer? Not map.queryRenderedFeatures: in MapLibre 5.6.0 with terrain on,
+  // its hit test sits about 20 px below the drawn dots after the camera moves (until the next zoom or
+  // pan), so a click on a dot misses it. map.project() always agrees with what is drawn, so test
+  // against projected positions, computed once per camera position and kept until the map moves.
+  // (It also returns the exact coordinates from the data file; features read back from the map's
+  // tiles are rounded at low zoom.)
+  let screenSpots = null;
+  const forgetSpots = () => { screenSpots = null; };
+  for (const event of ["move", "render", "terrain"]) map.on(event, forgetSpots);
+
+  function placeAt(point) {
+    if (!screenSpots) {
+      screenSpots = (matches || allPlaces).map((feature) => {
+        const at = map.project(feature.geometry.coordinates);
+        return { feature, x: at.x, y: at.y };
+      });
+    }
+    const reach = dotRadius(map.getZoom(), dotBoost) + 2.5;      // the dot and its white ring
+    let best = null;
+    let nearest = reach * reach;
+    for (const spot of screenSpots) {
+      const distance = (spot.x - point.x) ** 2 + (spot.y - point.y) ** 2;
+      if (distance <= nearest) { best = spot.feature; nearest = distance; }
+    }
+    return best;
   }
 
-  map.on("click", "places", (event) => show(event.features[0]));
-
-  map.on("mousemove", (event) => {
-    const hit = map.queryRenderedFeatures(event.point, { layers: ["places"] })[0];
-    map.getCanvas().style.cursor = hit ? "pointer" : "";
-    if (hit && !detail.isOpen()) {
-      tip.setLngLat(hit.geometry.coordinates).setText(hit.properties.name).addTo(map);
-    } else {
-      tip.remove();
-    }
-    const elevation = terrainElevation(event.lngLat);
-    $("readout").textContent = elevation === null
-      ? "Terrain elevation: not available (terrain off or still loading)"
-      : "Terrain elevation under cursor: " + Math.round(elevation).toLocaleString() + " m";
+  map.on("click", (event) => {
+    const place = placeAt(event.point);
+    if (place) show(place); else if (pinned) close();
   });
 
-  $("search").addEventListener("input", (event) => {
-    const feature = features.get(event.target.value);
-    if (!feature) return;
-    map.flyTo({ center: feature.geometry.coordinates, zoom: Math.max(map.getZoom(), 11), speed: 1.4 });
-    map.once("moveend", () => show(feature));
+  map.on("mousemove", (event) => {
+    const place = map.isMoving() ? null : placeAt(event.point);     // no hovering while dragging or flying
+    map.getCanvas().style.cursor = place ? "pointer" : "";
+    const id = place ? place.properties.id : null;
+    if (id !== hoveredId) {
+      hoveredId = id;
+      if (!pinned) { if (place) render(place, false); else hide(); }
+    }
+    const elevation = terrainElevation(event.lngLat);
+    $("readout").textContent = elevation === null ? "Unavailable" : Math.round(elevation).toLocaleString() + " m";
+  });
+  map.getCanvas().addEventListener("mouseleave", () => {   // e.g. the pointer moved onto the sidebar
+    hoveredId = null;
+    if (!pinned) hide();
+  });
+
+  $("dock-close").addEventListener("click", close);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && pinned && !event.defaultPrevented) close();
+  });
+
+  // ---- Search: a combobox with a popover list of matches -----------------------
+
+  const searchBox = $("search");
+  const resultList = $("results");
+  const clearButton = $("search-clear");
+  let results = [];
+  let active = -1;
+
+  function setOpen(open) {
+    resultList.hidden = !open;
+    searchBox.setAttribute("aria-expanded", String(open));
+    if (!open) searchBox.removeAttribute("aria-activedescendant");
+  }
+
+  function setActive(index, scroll) {
+    active = index;
+    [...resultList.children].forEach((item, i) => item.classList.toggle("active", i === index));
+    if (index >= 0) {
+      searchBox.setAttribute("aria-activedescendant", "result-" + index);
+      if (scroll) resultList.children[index].scrollIntoView({ block: "nearest" });   // keyboard only; the mouse is already there
+    } else searchBox.removeAttribute("aria-activedescendant");
+  }
+
+  function renderResults() {
+    resultList.textContent = "";
+    if (!searchBox.value.trim()) { results = []; setOpen(false); return; }
+    const all = searchItems(searchBox.value);
+    results = all.slice(0, RESULT_LIMIT);
+    results.forEach((item, i) => {
+      const row = document.createElement("li");
+      row.id = "result-" + i;
+      row.title = item.name + " — " + item.detail;
+      row.setAttribute("role", "option");
+      const name = document.createElement("span");
+      name.className = "name";
+      name.textContent = item.name;
+      const meta = document.createElement("span");
+      meta.className = "detail";
+      meta.textContent = item.detail;
+      row.append(name, meta);
+      row.addEventListener("mousedown", (event) => { event.preventDefault(); choose(item); });  // keep focus in the field
+      row.addEventListener("mouseenter", () => setActive(i));
+      resultList.appendChild(row);
+    });
+    const note = (text, className) => {
+      const row = document.createElement("li");
+      row.className = className;
+      row.setAttribute("role", "presentation");
+      row.textContent = text;
+      resultList.appendChild(row);
+    };
+    if (!all.length) note("No places found", "empty");
+    else if (all.length > results.length) {
+      note("Showing " + results.length + " of " + all.length.toLocaleString() + " matches. The map shows all of them.", "more");
+    }
+    setActive(-1);
+    setOpen(true);
+  }
+
+  // What the field matches: a pasted full "Name (type)" label is one place; otherwise every place
+  // whose name contains the text, best match first. null when the field is empty.
+  function matchesFor(text) {
+    const exact = features.get(text);
+    if (exact) return [exact];
+    return fold(text.trim()) ? searchItems(text).map((item) => item.feature) : null;
+  }
+
+  // Show exactly the matching places on the map (and nothing else), and say how many there are.
+  function applyMatches(list) {
+    matches = list;
+    const ids = list && list.map((feature) => feature.properties.id);
+    const filter = !list ? null : ids.length ? ["in", ["get", "id"], ["literal", ids]] : ["==", ["get", "id"], ""];
+    map.setFilter("places", filter);
+    map.setFilter("places-shadow", filter);
+    forgetSpots();
+    const boost = list ? 2 : 0;       // a search leaves few dots, often zoomed out: make them easier to see
+    if (boost !== dotBoost) {
+      dotBoost = boost;
+      map.setPaintProperty("places", "circle-radius", placeRadius(boost));
+      map.setPaintProperty("places-shadow", "circle-radius", placeRadius(boost + 1.5));
+      map.setPaintProperty("places-focus", "circle-radius", placeRadius(boost + 5));
+    }
+    setLabels(list);
+    if (pinned && list && !list.includes(pinned)) close();     // its dot is gone, so is its card
+    if (!summary || $("status").classList.contains("error")) return;
+    setStatus(!list ? summary : list.length ? list.length.toLocaleString() + " of " + totalPlaces.toLocaleString() + " places" : "No places match");
+  }
+
+  // ---- Names beside the dots ---------------------------------------------------------------
+  // When a search leaves few enough places, each gets its name next to its dot (an HTML marker, so it
+  // sits on the terrain like the dot does). Names are placed right, left, above or below the dot,
+  // whichever is free, and a name that fits nowhere is hidden rather than drawn over another.
+
+  const labels = new Map();     // place id -> { pin, label }
+  const markers = new Map();    // place id -> maplibregl.Marker
+  let labelOrder = [];          // place ids, best match first: they get the first pick of positions
+  const POSITIONS = ["pos-r", "pos-l", "pos-t", "pos-b"];
+  const overlaps = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+
+  function setLabels(list) {
+    const wanted = list && list.length <= LABEL_LIMIT ? list : [];
+    const keep = new Set(wanted.map((feature) => feature.properties.id));
+    for (const [id, marker] of markers) {
+      if (!keep.has(id)) { marker.remove(); markers.delete(id); labels.delete(id); }
+    }
+    for (const feature of wanted) {
+      const id = feature.properties.id;
+      if (markers.has(id)) continue;
+      const pin = document.createElement("div");
+      pin.className = "place-pin";
+      pin.setAttribute("aria-hidden", "true");              // the same names are in the results list
+      const label = document.createElement("span");
+      label.className = "place-label pos-r";
+      label.textContent = feature.properties.name;
+      pin.appendChild(label);
+      markers.set(id, new maplibregl.Marker({ element: pin, anchor: "center" }).setLngLat(feature.geometry.coordinates).addTo(map));
+      labels.set(id, { pin, label });
+    }
+    labelOrder = wanted.map((feature) => feature.properties.id);
+    markFocus(pinned ? pinned.properties.id : hoveredId);
+    queueLayout();
+  }
+
+  function markFocus(id) {      // the name of the place the card is about turns blue
+    for (const [placeId, entry] of labels) entry.label.classList.toggle("focus", placeId === id);
+  }
+
+  function layoutLabels() {
+    // Every dot is an obstacle too, so a name never covers somebody else's dot.
+    const placed = labelOrder.map((id) => {
+      const dot = labels.get(id).pin.getBoundingClientRect();
+      return { left: dot.left - 8, right: dot.left + 8, top: dot.top - 8, bottom: dot.top + 8 };
+    });
+    for (const id of labelOrder) {
+      const { label } = labels.get(id);
+      let fits = false;
+      for (const position of POSITIONS) {
+        label.classList.remove(...POSITIONS);
+        label.classList.add(position);
+        const r = label.getBoundingClientRect();
+        const box = { left: r.left - 2, right: r.right + 2, top: r.top - 1, bottom: r.bottom + 1 };
+        if (!placed.some((other) => overlaps(other, box))) { placed.push(box); fits = true; break; }
+      }
+      label.classList.toggle("hidden", !fits);
+    }
+  }
+
+  let layoutQueued = false;
+  function queueLayout() {      // once per frame, after MapLibre has moved the markers
+    if (layoutQueued) return;
+    layoutQueued = true;
+    requestAnimationFrame(() => { layoutQueued = false; layoutLabels(); });
+  }
+  for (const event of ["move", "moveend", "idle"]) map.on(event, queueLayout);
+
+  // ---- Framing the matches ------------------------------------------------------------------
+
+  // Is the place on screen and not hidden behind the sidebar?
+  function onScreen(feature) {
+    const canvas = map.getCanvas();
+    const point = map.project(feature.geometry.coordinates);       // accounts for the terrain
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return true;   // terrain not ready: can't tell
+    const panel = $("panel").getBoundingClientRect();
+    const behindPanel = point.x > panel.left && point.x < panel.right && point.y > panel.top && point.y < panel.bottom;
+    return !behindPanel && point.x > 8 && point.y > 8 && point.x < canvas.clientWidth - 8 && point.y < canvas.clientHeight - 8;
+  }
+
+  // Frame all the matches at once, clear of the sidebar. MapLibre's own fit ignores the tilt, so a
+  // tilted view would let some matches fall off the screen. A wide spread is framed from straight
+  // above; a local one keeps the tilt (that is where the relief shows) and is then checked, and
+  // zoomed out a little at a time until every match is really on screen.
+  let fitTimer = null;
+  function fitToMatches() {
+    if (!matches || !matches.length) return;
+    const token = searchToken;
+    const bounds = new maplibregl.LngLatBounds();
+    for (const feature of matches) bounds.extend(feature.geometry.coordinates);
+    const flat = map.cameraForBounds(bounds, { padding: FIT_PADDING, maxZoom: 12, bearing: 0 });
+    if (!flat) { map.fitBounds(bounds, { maxZoom: 12, duration: 900 }); return; }
+    const local = flat.zoom >= 10;
+    map.easeTo({ center: flat.center, zoom: local ? flat.zoom - 0.5 : flat.zoom, pitch: local ? 50 : 0, bearing: 0, duration: 900 });
+
+    // Check once the move is over and the terrain has loaded: until then the projection is off.
+    let tries = 0;
+    const verify = () => {
+      if (token !== searchToken || !matches || matches.every(onScreen) || tries++ >= 8) return;
+      map.easeTo({ zoom: map.getZoom() - 0.5, duration: 350 });
+      map.once("moveend", settled);
+    };
+    const settled = () => map.once("idle", verify);
+    map.once("moveend", settled);
+  }
+
+  // A fly-to ends by opening that place's card, unless the search changed on the way there.
+  let searchToken = 0;
+  function flyTo(feature) {
+    const token = searchToken;
+    map.flyTo({ center: feature.geometry.coordinates, zoom: Math.max(map.getZoom(), 11),
+                pitch: Math.max(map.getPitch(), 50), speed: 1.4 });     // up close, show the relief
+    map.once("moveend", () => { if (token === searchToken) show(feature); });
+  }
+
+  function choose(item) {
+    searchToken++;
+    clearTimeout(fitTimer);
+    searchBox.value = item.name;
+    clearButton.hidden = false;
+    setOpen(false);
+    applyMatches(matchesFor(item.name));
+    flyTo(item.feature);
+  }
+
+  // Enter with no row highlighted: take the search as typed. One match opens its card; several
+  // are all framed on the map.
+  function commitSearch() {
+    clearTimeout(fitTimer);
+    setOpen(false);
+    if (!matches || !matches.length) return;
+    if (matches.length === 1) flyTo(matches[0]); else fitToMatches();
+  }
+
+  function resetSearch() {
+    searchToken++;
+    clearTimeout(fitTimer);
+    searchBox.value = "";
+    clearButton.hidden = true;
+    setOpen(false);
+    applyMatches(null);
+  }
+
+  searchBox.addEventListener("input", () => {
+    searchToken++;
+    clearTimeout(fitTimer);
+    clearButton.hidden = !searchBox.value;
+    const exact = features.get(searchBox.value);        // a full "Name (type)" label, e.g. pasted
+    applyMatches(matchesFor(searchBox.value));
+    if (exact) { setOpen(false); flyTo(exact); return; }
+    renderResults();
+    if (fold(searchBox.value.trim()).length >= 2) fitTimer = setTimeout(fitToMatches, 300);   // let typing settle
+  });
+  searchBox.addEventListener("focus", () => { if (searchBox.value) renderResults(); });
+  searchBox.addEventListener("blur", () => setOpen(false));
+  searchBox.addEventListener("keydown", (event) => {
+    const open = !resultList.hidden;
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (!open) { renderResults(); return; }
+      if (!results.length) return;
+      const step = event.key === "ArrowDown" ? 1 : -1;
+      setActive(active < 0 ? (step > 0 ? 0 : results.length - 1) : (active + step + results.length) % results.length, true);
+    } else if (event.key === "Enter") {
+      if (!searchBox.value.trim()) return;
+      event.preventDefault();
+      if (open && results[active]) choose(results[active]); else commitSearch();
+    } else if (event.key === "Escape") {
+      if (open) { event.preventDefault(); setOpen(false); }
+      else if (searchBox.value) { event.preventDefault(); resetSearch(); }
+    }
+  });
+  clearButton.addEventListener("click", () => {
+    resetSearch();
+    searchBox.focus();
   });
 
   // Expose for debugging and automated checks.
-  window.viewer = { map, features, terrainElevation };
+  window.viewer = { map, features, byId, terrainElevation, labels, matchesFor, flatTile: (url) => flatTile(...tileOf(url)), seabedTile: (url) => seabedTile(...tileOf(url)) };
 })();
 </script>
 </body>

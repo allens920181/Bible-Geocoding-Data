@@ -40,7 +40,7 @@ The structure of the JSON is somewhat complex. Sorry!
 [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) supply elevation data in two places:
 
 * `scripts/add_elevation.py` fills in the [`elevation_meters`](#elevation-elevation_meters) of every modern location. It needs only Python 3 and an internet connection, and caches the roughly 30 MB of tiles it downloads in `.terrain-cache/`. `python3 scripts/add_elevation.py --check` exits with status 1 if `modern.jsonl` is out of date. `scripts/terrain_tiles.py` is the reusable part: `TerrainTiles(zoom=12).elevation(lon, lat)` returns the elevation in meters at any point. Run the tests with `python3 -m unittest discover -s scripts`.
-* `viewer/index.html` is a static page that shows the locations on 3D terrain with hillshade, colored by elevation. Serve the repository root and open the page:
+* `viewer/index.html` is a static page that shows the locations on 3D terrain with hillshade, colored by elevation. It follows Apple's iOS look (translucent materials, grouped lists, switches, light and dark appearance) and is built for desktop browsers only; there is no small-screen layout. Typing in the search box narrows the map to the places whose names match, all of them at once, framed together and, when there are 40 or fewer, labelled with their names. Serve the repository root and open the page:
 
 ```bash
 python3 -m http.server 8000
@@ -48,6 +48,8 @@ python3 -m http.server 8000
 ```
 
 The page loads [MapLibre GL JS](https://maplibre.org/) from a CDN and its base map from OpenStreetMap's public tile server. That is fine for trying it out, but not for heavy traffic (see the [tile usage policy](https://operations.osmfoundation.org/policies/tiles/)); if you deploy the page, replace `OSM_TILES` in `viewer/index.html` with your own tile source.
+
+The AWS tiles carry sea-floor depths below zoom 12 and a flat 0 m above it, which would draw the seas as a pit that fills up as you zoom in. The viewer therefore rewrites each elevation tile as it loads: everything below sea level becomes 0 m, so water is flat at every zoom, except the land that really lies below sea level (the Jordan Rift from the Sea of Galilee to the Dead Sea, and Egypt's Qattara Depression), which keeps its true height. This affects only what the viewer draws; `elevation_meters` is unchanged. The "Flat water" switch in the sidebar turns it off, to show the tiles as AWS sends them, sea floor included.
 
 # Ancient places (ancient.jsonl)
 
