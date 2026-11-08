@@ -40,7 +40,7 @@ The structure of the JSON is somewhat complex. Sorry!
 [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) supply elevation data in two places:
 
 * `scripts/add_elevation.py` fills in the [`elevation_meters`](#elevation-elevation_meters) of every modern location. It needs only Python 3 and an internet connection, and caches the roughly 30 MB of tiles it downloads in `.terrain-cache/`. `python3 scripts/add_elevation.py --check` exits with status 1 if `modern.jsonl` is out of date. `scripts/terrain_tiles.py` is the reusable part: `TerrainTiles(zoom=12).elevation(lon, lat)` returns the elevation in meters at any point. Run the tests with `python3 -m unittest discover -s scripts`.
-* `viewer/index.html` is a static page that shows the locations on 3D terrain with hillshade, colored by elevation. It follows Apple's iOS look (translucent materials, grouped lists, switches, light and dark appearance) and is built for desktop browsers only; there is no small-screen layout. Serve the repository root and open the page:
+* `viewer/index.html` is a static page that shows the locations on 3D terrain with hillshade, colored by elevation. It follows Apple's iOS look (translucent materials, grouped lists, switches, light and dark appearance) and is built for desktop browsers only; there is no small-screen layout. Typing in the search box narrows the map to the places whose names match, all of them at once. Serve the repository root and open the page:
 
 ```bash
 python3 -m http.server 8000

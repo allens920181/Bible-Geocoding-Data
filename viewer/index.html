@@ -500,6 +500,9 @@
 
   const features = new Map();   // search label -> GeoJSON feature
   const byId = new Map();       // place id -> GeoJSON feature, with exact coordinates
+  let matches = null;           // null: every place is shown; else the places the search field matches
+  let summary = "";             // the status line when nothing is searched, e.g. "1,596 places"
+  let totalPlaces = 0;
   const searchIndex = [];       // { feature, name, detail, key } for the results list
 
   // Lower-case and drop accents, so "beth shean" finds "Bêth-Shean".
@@ -545,9 +548,12 @@
     }
 
     const withElevation = collection.features.filter((f) => "elevation_meters" in f.properties).length;
-    setStatus(collection.features.length.toLocaleString() + " places" +
-      (withElevation < collection.features.length
-        ? " (" + withElevation + " with a stored elevation; run scripts/add_elevation.py for the rest)" : ""));
+    totalPlaces = collection.features.length;
+    summary = totalPlaces.toLocaleString() + " places" +
+      (withElevation < totalPlaces
+        ? " (" + withElevation + " with a stored elevation; run scripts/add_elevation.py for the rest)" : "");
+    setStatus(summary);
+    if (searchBox.value) applyMatches(matchesFor(searchBox.value));   // typed before the data arrived
   }
 
   function fact(label, value) {
@@ -715,26 +721,85 @@
       none.textContent = "No places found";
       resultList.appendChild(none);
     }
-    setActive(results.length ? 0 : -1);
+    setActive(-1);
     setOpen(true);
   }
 
+  // What the field matches: a pasted full "Name (type)" label is one place; otherwise every place
+  // whose name contains the text. null when the field is empty.
+  function matchesFor(text) {
+    const exact = features.get(text);
+    if (exact) return [exact];
+    const query = fold(text.trim());
+    return query ? searchIndex.filter((item) => item.key.includes(query)).map((item) => item.feature) : null;
+  }
+
+  // Show exactly the matching places on the map (and nothing else), and say how many there are.
+  function applyMatches(list) {
+    matches = list;
+    const ids = list && list.map((feature) => feature.properties.id);
+    const filter = !list ? null : ids.length ? ["in", ["get", "id"], ["literal", ids]] : ["==", ["get", "id"], ""];
+    map.setFilter("places", filter);
+    map.setFilter("places-shadow", filter);
+    if (pinned && list && !list.includes(pinned)) close();     // its dot is gone, so is its card
+    if (!summary || $("status").classList.contains("error")) return;
+    setStatus(!list ? summary : list.length ? list.length.toLocaleString() + " of " + totalPlaces.toLocaleString() + " places" : "No places match");
+  }
+
+  // Frame all the matches at once, clear of the sidebar.
+  let fitTimer = null;
+  function fitToMatches() {
+    if (!matches || !matches.length) return;
+    const bounds = new maplibregl.LngLatBounds();
+    for (const feature of matches) bounds.extend(feature.geometry.coordinates);
+    map.fitBounds(bounds, { padding: { top: 90, right: 90, bottom: 90, left: 400 }, maxZoom: 12, duration: 900 });
+  }
+
+  // A fly-to ends by opening that place's card, unless the search changed on the way there.
+  let searchToken = 0;
   function flyTo(feature) {
+    const token = searchToken;
     map.flyTo({ center: feature.geometry.coordinates, zoom: Math.max(map.getZoom(), 11), speed: 1.4 });
-    map.once("moveend", () => show(feature));
+    map.once("moveend", () => { if (token === searchToken) show(feature); });
   }
 
   function choose(item) {
+    searchToken++;
+    clearTimeout(fitTimer);
     searchBox.value = item.name;
     clearButton.hidden = false;
     setOpen(false);
+    applyMatches(matchesFor(item.name));
     flyTo(item.feature);
   }
 
+  // Enter with no row highlighted: take the search as typed. One match opens its card; several
+  // are all framed on the map.
+  function commitSearch() {
+    clearTimeout(fitTimer);
+    setOpen(false);
+    if (!matches || !matches.length) return;
+    if (matches.length === 1) flyTo(matches[0]); else fitToMatches();
+  }
+
+  function resetSearch() {
+    searchToken++;
+    clearTimeout(fitTimer);
+    searchBox.value = "";
+    clearButton.hidden = true;
+    setOpen(false);
+    applyMatches(null);
+  }
+
   searchBox.addEventListener("input", () => {
+    searchToken++;
+    clearTimeout(fitTimer);
     clearButton.hidden = !searchBox.value;
     const exact = features.get(searchBox.value);        // a full "Name (type)" label, e.g. pasted
-    if (exact) { setOpen(false); flyTo(exact); } else { renderResults(); }
+    applyMatches(matchesFor(searchBox.value));
+    if (exact) { setOpen(false); flyTo(exact); return; }
+    renderResults();
+    if (fold(searchBox.value.trim()).length >= 2) fitTimer = setTimeout(fitToMatches, 300);   // let typing settle
   });
   searchBox.addEventListener("focus", () => { if (searchBox.value) renderResults(); });
   searchBox.addEventListener("blur", () => setOpen(false));
@@ -745,18 +810,18 @@
       if (!open) { renderResults(); return; }
       if (!results.length) return;
       const step = event.key === "ArrowDown" ? 1 : -1;
-      setActive((active + step + results.length) % results.length);
+      setActive(active < 0 ? (step > 0 ? 0 : results.length - 1) : (active + step + results.length) % results.length);
     } else if (event.key === "Enter") {
-      if (open && results[active]) { event.preventDefault(); choose(results[active]); }
+      if (!searchBox.value.trim()) return;
+      event.preventDefault();
+      if (open && results[active]) choose(results[active]); else commitSearch();
     } else if (event.key === "Escape") {
       if (open) { event.preventDefault(); setOpen(false); }
-      else if (searchBox.value) { event.preventDefault(); searchBox.value = ""; clearButton.hidden = true; }
+      else if (searchBox.value) { event.preventDefault(); resetSearch(); }
     }
   });
   clearButton.addEventListener("click", () => {
-    searchBox.value = "";
-    clearButton.hidden = true;
-    setOpen(false);
+    resetSearch();
     searchBox.focus();
   });
 
