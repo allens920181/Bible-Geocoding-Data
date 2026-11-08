@@ -318,6 +318,7 @@
     <div class="group">
       <label class="row"><span>3D terrain</span><input id="toggle-terrain" class="switch" type="checkbox" role="switch" checked></label>
       <label class="row"><span>Hillshade</span><input id="toggle-hillshade" class="switch" type="checkbox" role="switch" checked></label>
+      <label class="row"><span>Flat water</span><input id="toggle-flatwater" class="switch" type="checkbox" role="switch" checked></label>
       <label class="row"><span>OpenStreetMap base</span><input id="toggle-osm" class="switch" type="checkbox" role="switch" checked></label>
     </div>
 
@@ -361,7 +362,8 @@
   // AWS Terrain Tiles, Terrarium encoding: elevation = R*256 + G + B/256 - 32768.
   // https://registry.opendata.aws/terrain-tiles/
   const TERRARIUM_TILES = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
-  const TERRAIN_TILES = "flatwater://{z}/{x}/{y}";    // the same tiles with the seas levelled; see "Flat water" below
+  const FLAT_WATER_TILES = "flatwater://{z}/{x}/{y}";  // the same tiles with the seas levelled; see "Flat water" below
+  const SEABED_TILES = "seabed://{z}/{x}/{y}";         // ... and as AWS sent them, sea floor included
   const TERRAIN_ATTRIBUTION =
     '<a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noopener">AWS Terrain Tiles</a> ' +
     '(<a href="https://github.com/tilezen/joerd/blob/master/docs/attribution.md" target="_blank" rel="noopener">sources</a>)';
@@ -453,29 +455,41 @@
     return (await canvasToBlob(context.canvas)).arrayBuffer();
   }
 
-  // The terrain and the hillshade ask for the same tiles, so each is fetched and rewritten once.
-  const flatTiles = new Map();                                                // url -> Promise<ArrayBuffer>
-  let levelingFailed = false;                                                 // warn once, not once per tile
-  function flatTile(url) {
-    if (!flatTiles.has(url)) {
-      const [, z, x, y] = url.match(/^flatwater:\/\/(\d+)\/(\d+)\/(\d+)/).map(Number);
-      const promise = fetch(TERRARIUM_TILES.replace("{z}", z).replace("{x}", x).replace("{y}", y))
-        .then((response) => {
-          if (!response.ok) throw new Error("HTTP " + response.status);
-          return response.arrayBuffer();
-        })
-        .then((png) => levelSeas(png, z, x, y).catch((error) => {            // never lose the tile over this
-          if (!levelingFailed) console.warn("Could not level the seas (" + error.message + "); showing the tiles as they are.");
-          levelingFailed = true;
-          return png;
-        }));
-      promise.catch(() => flatTiles.delete(url));                              // a failed download can be retried
-      flatTiles.set(url, promise);
-      if (flatTiles.size > 150) flatTiles.delete(flatTiles.keys().next().value);
+  // Two views of the same tiles: flatwater:// has the seas levelled, seabed:// is what AWS sent. The
+  // switch in the sidebar picks one by changing the tile URLs of the terrain and hillshade sources.
+  // A tile is downloaded once, and rewritten once, however many sources and switch positions ask for it.
+  const remember = (cache, key, make) => {                                    // a small cache of promises
+    if (!cache.has(key)) {
+      const promise = make();
+      promise.catch(() => cache.delete(key));                                  // a failed download can be retried
+      cache.set(key, promise);
+      if (cache.size > 150) cache.delete(cache.keys().next().value);
     }
-    return flatTiles.get(url);
-  }
-  maplibregl.addProtocol("flatwater", async (request) => ({ data: (await flatTile(request.url)).slice(0) }));
+    return cache.get(key);
+  };
+  const downloaded = new Map();                                               // "z/x/y" -> Promise<ArrayBuffer>, as AWS sent it
+  const levelled = new Map();                                                 // "z/x/y" -> Promise<ArrayBuffer>, seas flat
+  let levelingFailed = false;                                                 // warn once, not once per tile
+
+  const seabedTile = (z, x, y) => remember(downloaded, z + "/" + x + "/" + y, () =>
+    fetch(TERRARIUM_TILES.replace("{z}", z).replace("{x}", x).replace("{y}", y)).then((response) => {
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      return response.arrayBuffer();
+    }));
+  const flatTile = (z, x, y) => remember(levelled, z + "/" + x + "/" + y, async () => {
+    const png = await seabedTile(z, x, y);
+    try {
+      return await levelSeas(png, z, x, y);
+    } catch (error) {                                                         // never lose the tile over this
+      if (!levelingFailed) console.warn("Could not level the seas (" + error.message + "); showing the tiles as they are.");
+      levelingFailed = true;
+      return png;
+    }
+  });
+
+  const tileOf = (url) => url.match(/^\w+:\/\/(\d+)\/(\d+)\/(\d+)/).slice(1).map(Number);
+  maplibregl.addProtocol("flatwater", async (request) => ({ data: (await flatTile(...tileOf(request.url))).slice(0) }));
+  maplibregl.addProtocol("seabed", async (request) => ({ data: (await seabedTile(...tileOf(request.url))).slice(0) }));
 
   // ---- Map ----------------------------------------------------------------
 
@@ -490,9 +504,9 @@
                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors' },
         // Two sources with the same tiles: MapLibre recommends keeping the hillshade's
         // DEM separate from the terrain's, so the two can be requested at different zooms.
-        "terrain-dem": { type: "raster-dem", tiles: [TERRAIN_TILES], tileSize: 256, maxzoom: 15,
+        "terrain-dem": { type: "raster-dem", tiles: [FLAT_WATER_TILES], tileSize: 256, maxzoom: 15,
                          encoding: "terrarium", attribution: TERRAIN_ATTRIBUTION },
-        "hillshade-dem": { type: "raster-dem", tiles: [TERRAIN_TILES], tileSize: 256, maxzoom: 15,
+        "hillshade-dem": { type: "raster-dem", tiles: [FLAT_WATER_TILES], tileSize: 256, maxzoom: 15,
                            encoding: "terrarium" },
         places: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
       },
@@ -546,7 +560,11 @@
 
   let warned = false;
   map.on("error", (event) => {
-    console.error(event.error || event);
+    const error = event.error;
+    // A request cancelled because the view or a source changed (the Flat water switch, a fast pan)
+    // is not a failure. MapLibre's own cancellations are Errors whose message is "AbortError".
+    if (error && (error.name === "AbortError" || error.message === "AbortError")) return;
+    console.error(error || event);
     if (!warned && event.sourceId) {
       warned = true;
       setStatus("Some map tiles failed to load; check your connection.", true);
@@ -577,6 +595,11 @@
   $("toggle-terrain").addEventListener("change", applyTerrain);
   $("toggle-hillshade").addEventListener("change", (e) => setVisible("hillshade", e.target.checked));
   $("toggle-osm").addEventListener("change", (e) => setVisible("osm", e.target.checked));
+  $("toggle-flatwater").addEventListener("change", (e) => {       // levelled seas, or the sea floor as AWS has it
+    const tiles = [e.target.checked ? FLAT_WATER_TILES : SEABED_TILES];
+    map.getSource("terrain-dem").setTiles(tiles);
+    map.getSource("hillshade-dem").setTiles(tiles);
+  });
 
   function paintSlider() {
     const slider = $("exaggeration");
@@ -1095,7 +1118,7 @@
   });
 
   // Expose for debugging and automated checks.
-  window.viewer = { map, features, byId, terrainElevation, labels, matchesFor, flatTile };
+  window.viewer = { map, features, byId, terrainElevation, labels, matchesFor, flatTile: (url) => flatTile(...tileOf(url)), seabedTile: (url) => seabedTile(...tileOf(url)) };
 })();
 </script>
 </body>
