@@ -49,6 +49,8 @@ python3 -m http.server 8000
 
 The page loads [MapLibre GL JS](https://maplibre.org/) from a CDN and its base map from OpenStreetMap's public tile server. That is fine for trying it out, but not for heavy traffic (see the [tile usage policy](https://operations.osmfoundation.org/policies/tiles/)); if you deploy the page, replace `OSM_TILES` in `viewer/index.html` with your own tile source.
 
+The AWS tiles carry sea-floor depths below zoom 12 and a flat 0 m above it, which would draw the seas as a pit that fills up as you zoom in. The viewer therefore rewrites each elevation tile as it loads: everything below sea level becomes 0 m, so water is flat at every zoom, except the land that really lies below sea level (the Jordan Rift from the Sea of Galilee to the Dead Sea, and Egypt's Qattara Depression), which keeps its true height. This affects only what the viewer draws; `elevation_meters` is unchanged.
+
 # Ancient places (ancient.jsonl)
 
 This file contains data about the places as mentioned in the Bible text, disambiguates them, catalogs them by verse reference, and evaluates the confidence of modern scholarship that attempts to identify ancient places with modern locations.

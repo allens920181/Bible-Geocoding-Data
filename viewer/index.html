@@ -360,7 +360,8 @@
 
   // AWS Terrain Tiles, Terrarium encoding: elevation = R*256 + G + B/256 - 32768.
   // https://registry.opendata.aws/terrain-tiles/
-  const TERRAIN_TILES = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
+  const TERRARIUM_TILES = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
+  const TERRAIN_TILES = "flatwater://{z}/{x}/{y}";    // the same tiles with the seas levelled; see "Flat water" below
   const TERRAIN_ATTRIBUTION =
     '<a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noopener">AWS Terrain Tiles</a> ' +
     '(<a href="https://github.com/tilezen/joerd/blob/master/docs/attribution.md" target="_blank" rel="noopener">sources</a>)';
@@ -393,6 +394,88 @@
     }
     return RADIUS_STOPS[last][1] + extra;
   }
+
+  // ---- Flat water ---------------------------------------------------------
+  // Below zoom 12 the AWS tiles carry sea-floor depths, and from zoom 12 up they say a flat 0 m (open
+  // sea off Tel Aviv: about -500 m at zoom 9, 0 m at zoom 12). Used as they are, a sea is drawn as a pit
+  // that suddenly fills up as you zoom in, with the sea floor's relief shaded across the water. So each
+  // tile is rewritten on its way in: every pixel below sea level becomes exactly 0 m, except land that
+  // really lies below sea level, which keeps its true height.
+  const BELOW_SEA_LEVEL_LAND = [        // [west, south, east, north], in degrees
+    [35.0, 30.3, 36.0, 32.6],           // Jordan Rift, south: the Dead Sea (down to -430 m) and Wadi Arabah
+    [35.2, 32.6, 36.0, 33.05],          // Jordan Rift, north: Sea of Galilee (-213 m) and the Jordan Valley
+    [26.4, 29.4, 29.2, 30.85],          // Qattara Depression, Egypt (down to -133 m)
+  ];
+
+  // Those boxes in the pixels of tile z/x/y: [left, top, right, bottom], only those that touch it.
+  function landBelowSeaLevel(z, x, y, width, height) {
+    const n = 2 ** z;
+    const toX = (lon) => ((lon + 180) / 360 * n - x) * width;
+    const toY = (lat) => {
+      const sine = Math.sin(lat * Math.PI / 180);
+      return ((0.5 - Math.log((1 + sine) / (1 - sine)) / (4 * Math.PI)) * n - y) * height;
+    };
+    return BELOW_SEA_LEVEL_LAND.map(([west, south, east, north]) => [toX(west), toY(north), toX(east), toY(south)])
+      .filter(([left, top, right, bottom]) => right > 0 && left < width && bottom > 0 && top < height);
+  }
+
+  const makeCanvas = (width, height) => typeof OffscreenCanvas === "function"
+    ? new OffscreenCanvas(width, height)
+    : Object.assign(document.createElement("canvas"), { width, height });
+  const canvasToBlob = (canvas) => canvas.convertToBlob
+    ? canvas.convertToBlob({ type: "image/png" })
+    : new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+
+  // A Terrarium pixel is R*256 + G + B/256 - 32768 metres, so R below 128 means below sea level, and
+  // (128, 0, 0) is exactly 0 m. Returns the PNG bytes, untouched when nothing in the tile was below sea level.
+  async function levelSeas(png, z, x, y) {
+    const bitmap = await createImageBitmap(new Blob([png], { type: "image/png" }),
+      { premultiplyAlpha: "none", colorSpaceConversion: "none" });           // keep the values exactly as stored
+    const { width, height } = bitmap;
+    const context = makeCanvas(width, height).getContext("2d", { willReadFrequently: true });
+    context.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    const image = context.getImageData(0, 0, width, height);
+    const pixels = image.data;
+    const land = landBelowSeaLevel(z, x, y, width, height);
+    let changed = false;
+    for (let row = 0; row < height; row++) {
+      for (let column = 0; column < width; column++) {
+        const at = (row * width + column) * 4;
+        if (pixels[at] >= 128) continue;                                      // 0 m or higher
+        if (land.some(([left, top, right, bottom]) => column >= left && column < right && row >= top && row < bottom)) continue;
+        pixels[at] = 128; pixels[at + 1] = 0; pixels[at + 2] = 0;
+        changed = true;
+      }
+    }
+    if (!changed) return png;
+    context.putImageData(image, 0, 0);
+    return (await canvasToBlob(context.canvas)).arrayBuffer();
+  }
+
+  // The terrain and the hillshade ask for the same tiles, so each is fetched and rewritten once.
+  const flatTiles = new Map();                                                // url -> Promise<ArrayBuffer>
+  let levelingFailed = false;                                                 // warn once, not once per tile
+  function flatTile(url) {
+    if (!flatTiles.has(url)) {
+      const [, z, x, y] = url.match(/^flatwater:\/\/(\d+)\/(\d+)\/(\d+)/).map(Number);
+      const promise = fetch(TERRARIUM_TILES.replace("{z}", z).replace("{x}", x).replace("{y}", y))
+        .then((response) => {
+          if (!response.ok) throw new Error("HTTP " + response.status);
+          return response.arrayBuffer();
+        })
+        .then((png) => levelSeas(png, z, x, y).catch((error) => {            // never lose the tile over this
+          if (!levelingFailed) console.warn("Could not level the seas (" + error.message + "); showing the tiles as they are.");
+          levelingFailed = true;
+          return png;
+        }));
+      promise.catch(() => flatTiles.delete(url));                              // a failed download can be retried
+      flatTiles.set(url, promise);
+      if (flatTiles.size > 150) flatTiles.delete(flatTiles.keys().next().value);
+    }
+    return flatTiles.get(url);
+  }
+  maplibregl.addProtocol("flatwater", async (request) => ({ data: (await flatTile(request.url)).slice(0) }));
 
   // ---- Map ----------------------------------------------------------------
 
@@ -1012,7 +1095,7 @@
   });
 
   // Expose for debugging and automated checks.
-  window.viewer = { map, features, byId, terrainElevation, labels, matchesFor };
+  window.viewer = { map, features, byId, terrainElevation, labels, matchesFor, flatTile };
 })();
 </script>
 </body>
