@@ -122,16 +122,20 @@
     position: absolute; z-index: 10; top: calc(100% + 6px); left: 0; right: 0; margin: 0; padding: 4px; list-style: none;
     background: var(--popover); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
     border-radius: 14px; box-shadow: var(--shadow), var(--edge);
+    max-height: 344px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin;
   }
   #results li {
-    display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
-    padding: 7px 10px; border-radius: 9px; font-size: 14px; cursor: default;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 7px 10px; border-radius: 9px; font-size: 14px; line-height: 18px; cursor: default;
   }
-  #results li .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #results li .name {                                       /* two lines at most; the full name is in the tooltip */
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere;
+  }
   #results li .detail { flex: none; font-size: 12px; color: var(--label-2); font-variant-numeric: tabular-nums; }
   #results li.active { background: var(--blue); color: #fff; }
   #results li.active .detail { color: rgba(255, 255, 255, 0.78); }
   #results li.empty { color: var(--label-2); justify-content: center; }
+  #results li.more { display: block; padding: 8px 10px 6px; font-size: 12px; text-align: center; color: var(--label-2); }
 
   /* Inset grouped lists */
   .group-title {
@@ -259,6 +263,21 @@
   .callout .link:hover { text-decoration: none; background: var(--fill-2); }
   .callout .link:focus-visible { outline-offset: 0; }
   .callout .link::after { content: "↗"; }
+
+  /* ---- Names beside the dots of a small search -------------------------------------------- */
+
+  .place-pin { width: 0; height: 0; pointer-events: none; }
+  .place-label {
+    position: absolute; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font: 600 12px/16px var(--font); letter-spacing: -0.1px; color: #1c1c1e;
+    text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff, 0 0 4px #fff;   /* white halo, as in Apple Maps */
+  }
+  .place-label.pos-r { left: 12px; top: -8px; }
+  .place-label.pos-l { right: 12px; top: -8px; }
+  .place-label.pos-t { left: 0; bottom: 12px; transform: translateX(-50%); }
+  .place-label.pos-b { left: 0; top: 12px; transform: translateX(-50%); }
+  .place-label.hidden { visibility: hidden; }
+  .place-label.focus { color: #0066d6; }
 </style>
 </head>
 <body>
@@ -348,7 +367,9 @@
   const OSM_TILES = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
   const DATA_URL = "../data/modern.jsonl";   // relative to this page; serve the repository root
   const PLACE_URL = "https://www.openbible.info/geo/modern/";
-  const RESULT_LIMIT = 8;
+  const RESULT_LIMIT = 50;     // rows in the results list; the map shows every match
+  const LABEL_LIMIT = 40;      // name the dots on the map when a search leaves this many or fewer
+  const FIT_PADDING = { top: 90, right: 90, bottom: 90, left: 400 };   // keeps matches clear of the sidebar
 
   // Place colors by elevation, shared by the map layer and the legend. Viridis-like,
   // so it stays readable for color-blind viewers and against any background.
@@ -358,8 +379,20 @@
   ];
   const NO_ELEVATION_COLOR = "#9aa0a6";
 
-  // Dot size by zoom; `extra` widens it for the soft shadow drawn underneath.
-  const placeRadius = (extra) => ["interpolate", ["linear"], ["zoom"], 4, 3 + extra, 8, 5 + extra, 12, 7.5 + extra];
+  // Dot size by zoom (zoom, radius in px); `extra` widens it, e.g. for the soft shadow drawn underneath.
+  const RADIUS_STOPS = [[4, 3], [8, 5], [12, 7.5]];
+  const placeRadius = (extra) => ["interpolate", ["linear"], ["zoom"], ...RADIUS_STOPS.flatMap(([zoom, radius]) => [zoom, radius + extra])];
+  function dotRadius(zoom, extra) {         // the same curve as a number
+    const last = RADIUS_STOPS.length - 1;
+    if (zoom <= RADIUS_STOPS[0][0]) return RADIUS_STOPS[0][1] + extra;
+    for (let i = 1; i <= last; i++) {
+      if (zoom <= RADIUS_STOPS[i][0]) {
+        const [z0, r0] = RADIUS_STOPS[i - 1], [z1, r1] = RADIUS_STOPS[i];
+        return r0 + (r1 - r0) * (zoom - z0) / (z1 - z0) + extra;
+      }
+    }
+    return RADIUS_STOPS[last][1] + extra;
+  }
 
   // ---- Map ----------------------------------------------------------------
 
@@ -503,10 +536,40 @@
   let matches = null;           // null: every place is shown; else the places the search field matches
   let summary = "";             // the status line when nothing is searched, e.g. "1,596 places"
   let totalPlaces = 0;
+  let dotBoost = 0;             // extra dot radius while a search is showing
+  let allPlaces = [];           // every place, in file order
   const searchIndex = [];       // { feature, name, detail, key } for the results list
 
   // Lower-case and drop accents, so "beth shean" finds "Bêth-Shean".
   const fold = (text) => text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+  // How well a (folded) name matches the (folded) text, best first: the whole name; a name that starts
+  // with it as a whole word ("Mount Carmel" for "mount"); one that merely starts with it ("Mountains
+  // southwest of ..."); a word inside the name; anywhere in the name. -1 when it doesn't match.
+  const isWordChar = (ch) => /[a-z0-9]/.test(ch);
+  function matchRank(key, query) {
+    const at = key.indexOf(query);
+    if (at < 0) return -1;
+    const end = at + query.length;
+    const wholeWord = end === key.length || !isWordChar(key[end]);
+    if (key === query) return 0;
+    if (at === 0) return wholeWord ? 1 : 2;
+    if (!isWordChar(key[at - 1])) return wholeWord ? 3 : 4;
+    return 5;
+  }
+
+  // The places whose names match the text, best first. Shorter names win ties: they are more specific.
+  function searchItems(text) {
+    const query = fold(text.trim()).replace(/\s+/g, " ");
+    if (!query) return [];
+    const ranked = [];
+    for (const item of searchIndex) {
+      const rank = matchRank(item.key, query);
+      if (rank >= 0) ranked.push({ item, rank });
+    }
+    ranked.sort((a, b) => a.rank - b.rank || a.item.key.length - b.item.key.length || (a.item.key < b.item.key ? -1 : 1));
+    return ranked.map((entry) => entry.item);
+  }
 
   async function loadPlaces() {
     let text;
@@ -533,6 +596,7 @@
       collection.features.push({ type: "Feature", properties, geometry: { type: "Point", coordinates: [lon, lat] } });
     }
     map.getSource("places").setData(collection);
+    allPlaces = collection.features;
 
     // Search list. Several locations can share a name, so disambiguate by type, then by id.
     for (const feature of collection.features) {
@@ -620,20 +684,42 @@
     dock.classList.toggle("pinned", isPinned);
     dock.setAttribute("aria-live", isPinned ? "polite" : "off");
     map.setFilter("places-focus", ["==", ["get", "id"], feature.properties.id]);
+    markFocus(feature.properties.id);
   }
   function hide() {
     dock.classList.remove("visible", "pinned");
     map.setFilter("places-focus", ["==", ["get", "id"], ""]);
+    markFocus(null);
   }
   function show(feature) { pinned = feature; render(feature, true); }
   function close() { pinned = null; hide(); }
 
-  // Features read back from the map are tiled, so their coordinates are rounded at low zoom;
-  // the copy kept from the data file is exact.
-  const placeAt = (point) => {
-    const hit = map.queryRenderedFeatures(point, { layers: ["places"] })[0];
-    return hit ? (byId.get(hit.properties.id) || hit) : null;
-  };
+  // Which place is under the pointer? Not map.queryRenderedFeatures: in MapLibre 5.6.0 with terrain on,
+  // its hit test sits about 20 px below the drawn dots after the camera moves (until the next zoom or
+  // pan), so a click on a dot misses it. map.project() always agrees with what is drawn, so test
+  // against projected positions, computed once per camera position and kept until the map moves.
+  // (It also returns the exact coordinates from the data file; features read back from the map's
+  // tiles are rounded at low zoom.)
+  let screenSpots = null;
+  const forgetSpots = () => { screenSpots = null; };
+  for (const event of ["move", "render", "terrain"]) map.on(event, forgetSpots);
+
+  function placeAt(point) {
+    if (!screenSpots) {
+      screenSpots = (matches || allPlaces).map((feature) => {
+        const at = map.project(feature.geometry.coordinates);
+        return { feature, x: at.x, y: at.y };
+      });
+    }
+    const reach = dotRadius(map.getZoom(), dotBoost) + 2.5;      // the dot and its white ring
+    let best = null;
+    let nearest = reach * reach;
+    for (const spot of screenSpots) {
+      const distance = (spot.x - point.x) ** 2 + (spot.y - point.y) ** 2;
+      if (distance <= nearest) { best = spot.feature; nearest = distance; }
+    }
+    return best;
+  }
 
   map.on("click", (event) => {
     const place = placeAt(event.point);
@@ -641,7 +727,7 @@
   });
 
   map.on("mousemove", (event) => {
-    const place = placeAt(event.point);
+    const place = map.isMoving() ? null : placeAt(event.point);     // no hovering while dragging or flying
     map.getCanvas().style.cursor = place ? "pointer" : "";
     const id = place ? place.properties.id : null;
     if (id !== hoveredId) {
@@ -675,33 +761,24 @@
     if (!open) searchBox.removeAttribute("aria-activedescendant");
   }
 
-  function setActive(index) {
+  function setActive(index, scroll) {
     active = index;
     [...resultList.children].forEach((item, i) => item.classList.toggle("active", i === index));
-    if (index >= 0) searchBox.setAttribute("aria-activedescendant", "result-" + index);
-    else searchBox.removeAttribute("aria-activedescendant");
+    if (index >= 0) {
+      searchBox.setAttribute("aria-activedescendant", "result-" + index);
+      if (scroll) resultList.children[index].scrollIntoView({ block: "nearest" });   // keyboard only; the mouse is already there
+    } else searchBox.removeAttribute("aria-activedescendant");
   }
 
   function renderResults() {
-    const query = fold(searchBox.value.trim());
-    results = [];
-    if (query) {
-      const prefix = [];
-      const inside = [];
-      for (const item of searchIndex) {
-        const at = item.key.indexOf(query);
-        if (at === 0) prefix.push(item);
-        else if (at > 0) inside.push(item);
-        if (prefix.length >= RESULT_LIMIT) break;
-      }
-      results = prefix.concat(inside).slice(0, RESULT_LIMIT);
-    }
-
     resultList.textContent = "";
-    if (!query) { setOpen(false); return; }
+    if (!searchBox.value.trim()) { results = []; setOpen(false); return; }
+    const all = searchItems(searchBox.value);
+    results = all.slice(0, RESULT_LIMIT);
     results.forEach((item, i) => {
       const row = document.createElement("li");
       row.id = "result-" + i;
+      row.title = item.name + " — " + item.detail;
       row.setAttribute("role", "option");
       const name = document.createElement("span");
       name.className = "name";
@@ -714,24 +791,27 @@
       row.addEventListener("mouseenter", () => setActive(i));
       resultList.appendChild(row);
     });
-    if (!results.length) {
-      const none = document.createElement("li");
-      none.className = "empty";
-      none.setAttribute("role", "presentation");
-      none.textContent = "No places found";
-      resultList.appendChild(none);
+    const note = (text, className) => {
+      const row = document.createElement("li");
+      row.className = className;
+      row.setAttribute("role", "presentation");
+      row.textContent = text;
+      resultList.appendChild(row);
+    };
+    if (!all.length) note("No places found", "empty");
+    else if (all.length > results.length) {
+      note("Showing " + results.length + " of " + all.length.toLocaleString() + " matches. The map shows all of them.", "more");
     }
     setActive(-1);
     setOpen(true);
   }
 
   // What the field matches: a pasted full "Name (type)" label is one place; otherwise every place
-  // whose name contains the text. null when the field is empty.
+  // whose name contains the text, best match first. null when the field is empty.
   function matchesFor(text) {
     const exact = features.get(text);
     if (exact) return [exact];
-    const query = fold(text.trim());
-    return query ? searchIndex.filter((item) => item.key.includes(query)).map((item) => item.feature) : null;
+    return fold(text.trim()) ? searchItems(text).map((item) => item.feature) : null;
   }
 
   // Show exactly the matching places on the map (and nothing else), and say how many there are.
@@ -741,25 +821,131 @@
     const filter = !list ? null : ids.length ? ["in", ["get", "id"], ["literal", ids]] : ["==", ["get", "id"], ""];
     map.setFilter("places", filter);
     map.setFilter("places-shadow", filter);
+    forgetSpots();
+    const boost = list ? 2 : 0;       // a search leaves few dots, often zoomed out: make them easier to see
+    if (boost !== dotBoost) {
+      dotBoost = boost;
+      map.setPaintProperty("places", "circle-radius", placeRadius(boost));
+      map.setPaintProperty("places-shadow", "circle-radius", placeRadius(boost + 1.5));
+      map.setPaintProperty("places-focus", "circle-radius", placeRadius(boost + 5));
+    }
+    setLabels(list);
     if (pinned && list && !list.includes(pinned)) close();     // its dot is gone, so is its card
     if (!summary || $("status").classList.contains("error")) return;
     setStatus(!list ? summary : list.length ? list.length.toLocaleString() + " of " + totalPlaces.toLocaleString() + " places" : "No places match");
   }
 
-  // Frame all the matches at once, clear of the sidebar.
+  // ---- Names beside the dots ---------------------------------------------------------------
+  // When a search leaves few enough places, each gets its name next to its dot (an HTML marker, so it
+  // sits on the terrain like the dot does). Names are placed right, left, above or below the dot,
+  // whichever is free, and a name that fits nowhere is hidden rather than drawn over another.
+
+  const labels = new Map();     // place id -> { pin, label }
+  const markers = new Map();    // place id -> maplibregl.Marker
+  let labelOrder = [];          // place ids, best match first: they get the first pick of positions
+  const POSITIONS = ["pos-r", "pos-l", "pos-t", "pos-b"];
+  const overlaps = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+
+  function setLabels(list) {
+    const wanted = list && list.length <= LABEL_LIMIT ? list : [];
+    const keep = new Set(wanted.map((feature) => feature.properties.id));
+    for (const [id, marker] of markers) {
+      if (!keep.has(id)) { marker.remove(); markers.delete(id); labels.delete(id); }
+    }
+    for (const feature of wanted) {
+      const id = feature.properties.id;
+      if (markers.has(id)) continue;
+      const pin = document.createElement("div");
+      pin.className = "place-pin";
+      pin.setAttribute("aria-hidden", "true");              // the same names are in the results list
+      const label = document.createElement("span");
+      label.className = "place-label pos-r";
+      label.textContent = feature.properties.name;
+      pin.appendChild(label);
+      markers.set(id, new maplibregl.Marker({ element: pin, anchor: "center" }).setLngLat(feature.geometry.coordinates).addTo(map));
+      labels.set(id, { pin, label });
+    }
+    labelOrder = wanted.map((feature) => feature.properties.id);
+    markFocus(pinned ? pinned.properties.id : hoveredId);
+    queueLayout();
+  }
+
+  function markFocus(id) {      // the name of the place the card is about turns blue
+    for (const [placeId, entry] of labels) entry.label.classList.toggle("focus", placeId === id);
+  }
+
+  function layoutLabels() {
+    // Every dot is an obstacle too, so a name never covers somebody else's dot.
+    const placed = labelOrder.map((id) => {
+      const dot = labels.get(id).pin.getBoundingClientRect();
+      return { left: dot.left - 8, right: dot.left + 8, top: dot.top - 8, bottom: dot.top + 8 };
+    });
+    for (const id of labelOrder) {
+      const { label } = labels.get(id);
+      let fits = false;
+      for (const position of POSITIONS) {
+        label.classList.remove(...POSITIONS);
+        label.classList.add(position);
+        const r = label.getBoundingClientRect();
+        const box = { left: r.left - 2, right: r.right + 2, top: r.top - 1, bottom: r.bottom + 1 };
+        if (!placed.some((other) => overlaps(other, box))) { placed.push(box); fits = true; break; }
+      }
+      label.classList.toggle("hidden", !fits);
+    }
+  }
+
+  let layoutQueued = false;
+  function queueLayout() {      // once per frame, after MapLibre has moved the markers
+    if (layoutQueued) return;
+    layoutQueued = true;
+    requestAnimationFrame(() => { layoutQueued = false; layoutLabels(); });
+  }
+  for (const event of ["move", "moveend", "idle"]) map.on(event, queueLayout);
+
+  // ---- Framing the matches ------------------------------------------------------------------
+
+  // Is the place on screen and not hidden behind the sidebar?
+  function onScreen(feature) {
+    const canvas = map.getCanvas();
+    const point = map.project(feature.geometry.coordinates);       // accounts for the terrain
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return true;   // terrain not ready: can't tell
+    const panel = $("panel").getBoundingClientRect();
+    const behindPanel = point.x > panel.left && point.x < panel.right && point.y > panel.top && point.y < panel.bottom;
+    return !behindPanel && point.x > 8 && point.y > 8 && point.x < canvas.clientWidth - 8 && point.y < canvas.clientHeight - 8;
+  }
+
+  // Frame all the matches at once, clear of the sidebar. MapLibre's own fit ignores the tilt, so a
+  // tilted view would let some matches fall off the screen. A wide spread is framed from straight
+  // above; a local one keeps the tilt (that is where the relief shows) and is then checked, and
+  // zoomed out a little at a time until every match is really on screen.
   let fitTimer = null;
   function fitToMatches() {
     if (!matches || !matches.length) return;
+    const token = searchToken;
     const bounds = new maplibregl.LngLatBounds();
     for (const feature of matches) bounds.extend(feature.geometry.coordinates);
-    map.fitBounds(bounds, { padding: { top: 90, right: 90, bottom: 90, left: 400 }, maxZoom: 12, duration: 900 });
+    const flat = map.cameraForBounds(bounds, { padding: FIT_PADDING, maxZoom: 12, bearing: 0 });
+    if (!flat) { map.fitBounds(bounds, { maxZoom: 12, duration: 900 }); return; }
+    const local = flat.zoom >= 10;
+    map.easeTo({ center: flat.center, zoom: local ? flat.zoom - 0.5 : flat.zoom, pitch: local ? 50 : 0, bearing: 0, duration: 900 });
+
+    // Check once the move is over and the terrain has loaded: until then the projection is off.
+    let tries = 0;
+    const verify = () => {
+      if (token !== searchToken || !matches || matches.every(onScreen) || tries++ >= 8) return;
+      map.easeTo({ zoom: map.getZoom() - 0.5, duration: 350 });
+      map.once("moveend", settled);
+    };
+    const settled = () => map.once("idle", verify);
+    map.once("moveend", settled);
   }
 
   // A fly-to ends by opening that place's card, unless the search changed on the way there.
   let searchToken = 0;
   function flyTo(feature) {
     const token = searchToken;
-    map.flyTo({ center: feature.geometry.coordinates, zoom: Math.max(map.getZoom(), 11), speed: 1.4 });
+    map.flyTo({ center: feature.geometry.coordinates, zoom: Math.max(map.getZoom(), 11),
+                pitch: Math.max(map.getPitch(), 50), speed: 1.4 });     // up close, show the relief
     map.once("moveend", () => { if (token === searchToken) show(feature); });
   }
 
@@ -810,7 +996,7 @@
       if (!open) { renderResults(); return; }
       if (!results.length) return;
       const step = event.key === "ArrowDown" ? 1 : -1;
-      setActive(active < 0 ? (step > 0 ? 0 : results.length - 1) : (active + step + results.length) % results.length);
+      setActive(active < 0 ? (step > 0 ? 0 : results.length - 1) : (active + step + results.length) % results.length, true);
     } else if (event.key === "Enter") {
       if (!searchBox.value.trim()) return;
       event.preventDefault();
@@ -826,7 +1012,7 @@
   });
 
   // Expose for debugging and automated checks.
-  window.viewer = { map, features, byId, terrainElevation };
+  window.viewer = { map, features, byId, terrainElevation, labels, matchesFor };
 })();
 </script>
 </body>
