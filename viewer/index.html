@@ -227,21 +227,22 @@
   .maplibregl-ctrl-attrib a { color: var(--label-2); }
   @media (prefers-color-scheme: dark) { .maplibregl-ctrl-attrib-button { filter: invert(1); } }
 
-  /* ---- Callout and hover label ----------------------------------------------------------- */
+  /* ---- Place card, docked at the bottom right ---------------------------------------------- */
 
-  .maplibregl-popup-content {
-    width: 268px; box-sizing: border-box; padding: 16px 16px 4px;
-    background: var(--popover); color: var(--label); font: 14px/1.4 var(--font);
-    -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
-    border-radius: 16px; box-shadow: var(--shadow), var(--edge);
+  #dock {
+    position: absolute; right: 12px; bottom: 44px; z-index: 2;       /* just above the attribution */
+    width: 300px; box-sizing: border-box; padding: 16px 16px 16px;
+    background: var(--material); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+    border-radius: 20px; box-shadow: var(--shadow), var(--edge);
+    opacity: 0; visibility: hidden; transform: translateY(10px); pointer-events: none;
+    transition: opacity 0.2s, transform 0.25s cubic-bezier(0.3, 0.7, 0.4, 1), visibility 0s 0.25s;
   }
-  .maplibregl-popup-tip { display: none; }
-  .maplibregl-popup-close-button {
-    top: 12px; right: 12px; display: grid; place-items: center; width: 22px; height: 22px; padding: 0 0 2px;
-    border-radius: 50%; background: var(--fill-2); color: var(--label-2); font: 400 17px/1 var(--font);
-    transition: background 0.15s;
-  }
-  .maplibregl-popup-close-button:hover { background: var(--fill); }
+  #dock.visible { opacity: 1; visibility: visible; transform: none; transition-delay: 0s; }
+  #dock.pinned { pointer-events: auto; padding-bottom: 6px; }      /* hovering only previews; a click pins it */
+  .dock-close { position: absolute; top: 14px; right: 14px; width: 22px; height: 22px; margin: 0; }
+  .dock-close svg { width: 9px; height: 9px; }
+  #dock:not(.pinned) .dock-close { display: none; }
+
   .callout h3 { margin: 0 28px 0 0; font: 600 17px/22px var(--font); letter-spacing: -0.2px; }
   .callout .subtitle { margin: 1px 0 12px; font-size: 13px; color: var(--label-2); }
   .callout dl { margin: 0; background: var(--fill-2); border-radius: 10px; }
@@ -258,10 +259,6 @@
   .callout .link:hover { text-decoration: none; background: var(--fill-2); }
   .callout .link:focus-visible { outline-offset: 0; }
   .callout .link::after { content: "↗"; }
-
-  .hover-tip .maplibregl-popup-content {
-    width: auto; padding: 5px 10px; border-radius: 9px; font-size: 12px; font-weight: 500; pointer-events: none;
-  }
 </style>
 </head>
 <body>
@@ -326,6 +323,13 @@
       Data: <a href="https://www.openbible.info/geo/">OpenBible.info</a>, CC BY 4.0.
     </p>
   </div>
+</aside>
+
+<aside id="dock" aria-label="Place details">
+  <button id="dock-close" class="icon-button dock-close" type="button" aria-label="Close" title="Close (Esc)">
+    <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="m1.5 1.5 7 7m0-7-7 7"/></svg>
+  </button>
+  <div id="dock-content"></div>
 </aside>
 
 <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
@@ -396,6 +400,10 @@
             "circle-stroke-color": "#ffffff",
             "circle-stroke-width": 1.5,
           } },
+        // Ring around the place the card describes; the filter is set from script.
+        { id: "places-focus", type: "circle", source: "places", filter: ["==", ["get", "id"], ""],
+          paint: { "circle-radius": placeRadius(5), "circle-color": "rgba(0, 0, 0, 0)",
+                   "circle-stroke-color": "#0a84ff", "circle-stroke-width": 3 } },
       ],
     },
     center: [35.35, 31.75],
@@ -491,6 +499,7 @@
   // ---- Places -------------------------------------------------------------
 
   const features = new Map();   // search label -> GeoJSON feature
+  const byId = new Map();       // place id -> GeoJSON feature, with exact coordinates
   const searchIndex = [];       // { feature, name, detail, key } for the results list
 
   // Lower-case and drop accents, so "beth shean" finds "Bêth-Shean".
@@ -528,6 +537,7 @@
       let label = p.name + " (" + p.type + ")";
       if (features.has(label)) label += " " + p.id;
       features.set(label, feature);
+      byId.set(p.id, feature);
       searchIndex.push({
         feature, name: p.name, key: fold(p.name),
         detail: p.type + ("elevation_meters" in p ? " · " + p.elevation_meters.toLocaleString() + " m" : ""),
@@ -551,7 +561,8 @@
     return row;
   }
 
-  function describe(feature) {
+  // `full` adds the coordinates and the link; the hover preview leaves them out.
+  function describe(feature, full) {
     const p = feature.properties;
     const root = document.createElement("div");
     root.className = "callout";
@@ -574,10 +585,10 @@
     root.appendChild(subtitle);
 
     const facts = document.createElement("dl");
-    facts.append(
-      fact("Elevation", elevation === undefined ? "Unknown" : elevation.toLocaleString() + " m" + source),
-      fact("Location", lat.toFixed(5) + "°, " + lon.toFixed(5) + "°"));
+    facts.append(fact("Elevation", elevation === undefined ? "Unknown" : elevation.toLocaleString() + " m" + source));
+    if (full) facts.append(fact("Location", lat.toFixed(5) + "°, " + lon.toFixed(5) + "°"));
     root.appendChild(facts);
+    if (!full) return root;
 
     const link = document.createElement("a");
     link.className = "link";
@@ -589,26 +600,59 @@
     return root;
   }
 
-  const detail = new maplibregl.Popup({ offset: 14, maxWidth: "none" });
-  const tip = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 14, className: "hover-tip" });
+  // ---- Place card, docked at the bottom right -------------------------------------
+  // Nothing is drawn next to the dots: hovering a place previews it in the card, clicking (or
+  // searching) pins it, and the dot it describes gets a blue ring.
 
-  function show(feature) {
-    tip.remove();
-    detail.setLngLat(feature.geometry.coordinates).setDOMContent(describe(feature)).addTo(map);
+  const dock = $("dock");
+  let pinned = null;      // the place opened by a click or a search
+  let hoveredId = null;   // the place under the cursor
+
+  function render(feature, isPinned) {
+    $("dock-content").replaceChildren(describe(feature, isPinned));
+    dock.classList.add("visible");
+    dock.classList.toggle("pinned", isPinned);
+    dock.setAttribute("aria-live", isPinned ? "polite" : "off");
+    map.setFilter("places-focus", ["==", ["get", "id"], feature.properties.id]);
   }
+  function hide() {
+    dock.classList.remove("visible", "pinned");
+    map.setFilter("places-focus", ["==", ["get", "id"], ""]);
+  }
+  function show(feature) { pinned = feature; render(feature, true); }
+  function close() { pinned = null; hide(); }
 
-  map.on("click", "places", (event) => show(event.features[0]));
+  // Features read back from the map are tiled, so their coordinates are rounded at low zoom;
+  // the copy kept from the data file is exact.
+  const placeAt = (point) => {
+    const hit = map.queryRenderedFeatures(point, { layers: ["places"] })[0];
+    return hit ? (byId.get(hit.properties.id) || hit) : null;
+  };
+
+  map.on("click", (event) => {
+    const place = placeAt(event.point);
+    if (place) show(place); else if (pinned) close();
+  });
 
   map.on("mousemove", (event) => {
-    const hit = map.queryRenderedFeatures(event.point, { layers: ["places"] })[0];
-    map.getCanvas().style.cursor = hit ? "pointer" : "";
-    if (hit && !detail.isOpen()) {
-      tip.setLngLat(hit.geometry.coordinates).setText(hit.properties.name).addTo(map);
-    } else {
-      tip.remove();
+    const place = placeAt(event.point);
+    map.getCanvas().style.cursor = place ? "pointer" : "";
+    const id = place ? place.properties.id : null;
+    if (id !== hoveredId) {
+      hoveredId = id;
+      if (!pinned) { if (place) render(place, false); else hide(); }
     }
     const elevation = terrainElevation(event.lngLat);
     $("readout").textContent = elevation === null ? "Unavailable" : Math.round(elevation).toLocaleString() + " m";
+  });
+  map.getCanvas().addEventListener("mouseleave", () => {   // e.g. the pointer moved onto the sidebar
+    hoveredId = null;
+    if (!pinned) hide();
+  });
+
+  $("dock-close").addEventListener("click", close);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && pinned && !event.defaultPrevented) close();
   });
 
   // ---- Search: a combobox with a popover list of matches -----------------------
@@ -706,7 +750,7 @@
       if (open && results[active]) { event.preventDefault(); choose(results[active]); }
     } else if (event.key === "Escape") {
       if (open) { event.preventDefault(); setOpen(false); }
-      else if (searchBox.value) { searchBox.value = ""; clearButton.hidden = true; }
+      else if (searchBox.value) { event.preventDefault(); searchBox.value = ""; clearButton.hidden = true; }
     }
   });
   clearButton.addEventListener("click", () => {
@@ -717,7 +761,7 @@
   });
 
   // Expose for debugging and automated checks.
-  window.viewer = { map, features, terrainElevation };
+  window.viewer = { map, features, byId, terrainElevation };
 })();
 </script>
 </body>
